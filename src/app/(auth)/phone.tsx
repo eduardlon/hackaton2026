@@ -78,6 +78,8 @@ export default function PhoneScreen() {
           params: { phone, fromContinue: '1' },
         });
       }
+    } catch {
+      // El store expone el error en pantalla; evitamos promesas no capturadas en Expo.
     } finally {
       setLoading(false);
     }

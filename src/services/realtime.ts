@@ -19,10 +19,10 @@ export type FinancialRealtimePayload = {
 
 type FinancialRealtimeHandler = (payload: FinancialRealtimePayload) => void;
 
-const realtimeClient = baseUrl
+const realtimeClient = baseUrl && anonKey
   ? createClient({
       baseUrl,
-      anonKey: anonKey || undefined,
+      anonKey,
     })
   : null;
 

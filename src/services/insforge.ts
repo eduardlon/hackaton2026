@@ -35,6 +35,30 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
+export function getSessionUserId(): string | null {
+  if (!accessToken) return null;
+  if (accessToken.startsWith('demo-session-')) {
+    return accessToken.replace('demo-session-', '') || null;
+  }
+  const [, payload] = accessToken.split('.');
+  if (!payload) return null;
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const json = decodeURIComponent(
+      atob(padded)
+        .split('')
+        .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+        .join('')
+    );
+    const parsed = JSON.parse(json) as { sub?: string; exp?: number };
+    if (parsed.exp && parsed.exp * 1000 < Date.now()) return null;
+    return parsed.sub || null;
+  } catch {
+    return null;
+  }
+}
+
 export function clearMemorySession() {
   accessToken = null;
 }
@@ -317,10 +341,14 @@ export async function invokeFunction<T = unknown>(
   if (!isInsforgeConfigured()) {
     throw new Error(`[insforge] sin URL configurada para invocar "${slug}"`);
   }
+  const userId = getSessionUserId();
+  const payload = userId && !body?.userId
+    ? { ...(body ?? {}), userId }
+    : (body ?? {});
   const res = await fetch(functionUrl(slug), {
     method: 'POST',
     headers: buildHeaders(),
-    body: JSON.stringify(body ?? {}),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw await parseError(res, `Error invocando "${slug}"`);
   return (await res.json()) as T;

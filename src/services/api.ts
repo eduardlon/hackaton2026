@@ -144,6 +144,10 @@ type CreditProfileResponse = {
   pointsToNextTier: number;
 };
 
+type CreditStatusResponse = Credit & {
+  mode?: string;
+};
+
 type ObtainCreditResponse = {
   loan: {
     id: string;
@@ -499,28 +503,30 @@ export async function getPassport(): Promise<Passport> {
 
 export async function getCredit(): Promise<Credit> {
   return withFallback(
-    'get-credit-profile',
-    async () => {
-      const data = await invokeFunction<CreditProfileResponse>('get-credit-profile', {});
-      return {
-        estimatedAmount: data.availableAmount,
-        safeMonthlyPayment: data.safeMonthlyPayment,
-        risk: ['bajo', 'medio-bajo', 'medio', 'medio-alto', 'alto'].includes(String(data.risk))
-          ? (data.risk as Credit['risk'])
-          : mockCredit.risk,
-        eligibility: data.eligibility,
-        potentialAmount: data.nextTierAmount || data.maxAmount,
-        level: data.level,
-      };
-    },
+    'get-credit-status',
+    async () => invokeFunction<CreditStatusResponse>('get-credit-status', {}),
     mockCredit
   );
 }
 
 export async function getCreditProfile(): Promise<CreditProfileResponse> {
   return withFallback(
-    'get-credit-profile',
-    async () => invokeFunction<CreditProfileResponse>('get-credit-profile', {}),
+    'get-credit-status',
+    async () => {
+      const credit = await invokeFunction<CreditStatusResponse>('get-credit-status', {});
+      const usedAmount = credit.activeLoan?.outstandingBalance ?? 0;
+      return {
+        availableAmount: credit.estimatedAmount,
+        maxAmount: Math.max(credit.estimatedAmount + usedAmount, credit.potentialAmount),
+        usedAmount,
+        safeMonthlyPayment: credit.safeMonthlyPayment,
+        risk: credit.risk,
+        eligibility: credit.eligibility,
+        level: credit.level,
+        nextTierAmount: credit.potentialAmount,
+        pointsToNextTier: Math.max(0, mockUser.nextLevelPoints - mockUser.points),
+      };
+    },
     {
       availableAmount: mockCredit.estimatedAmount,
       maxAmount: mockCredit.estimatedAmount,

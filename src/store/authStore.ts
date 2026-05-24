@@ -74,7 +74,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   lookupPhone: async (phone) => {
     set({ error: null });
-    return lookupPhone(phone);
+    try {
+      return await lookupPhone(phone);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No fue posible validar el celular';
+      set({ error: message });
+      throw err;
+    }
   },
 
   register: async (phone, name, pin, enableBiometricOpt = true) => {
