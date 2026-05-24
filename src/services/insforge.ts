@@ -22,8 +22,6 @@ const functionsUrl = (process.env.EXPO_PUBLIC_INSFORGE_FUNCTIONS_URL ?? '').repl
 const anonKey = process.env.EXPO_PUBLIC_INSFORGE_ANON_KEY ?? '';
 
 const PIN_PEPPER = 'fingrow.v1';
-const DEMO_PHONE = '+573001112233';
-const DEMO_PIN = '1234';
 
 export function isInsforgeConfigured() {
   return Boolean(baseUrl || functionsUrl);
@@ -199,13 +197,6 @@ export type AuthUser = {
   email?: string;
 };
 
-const demoUser: AuthUser = {
-  id: 'demo-3001112233',
-  phone: DEMO_PHONE,
-  name: 'Usuario Demo',
-  type: 'demo',
-};
-
 type AuthSessionResponse = {
   user?: AuthUser;
   session?: { access_token?: string; refresh_token?: string };
@@ -234,9 +225,6 @@ function extractAuth(payload: AuthSessionResponse, phoneFallback: string): AuthU
 
 export async function lookupPhone(phone: string): Promise<{ exists: boolean; name?: string }> {
   const normalized = normalizePhone(phone);
-  if (normalized === DEMO_PHONE) {
-    return { exists: true, name: demoUser.name };
-  }
   if (!isInsforgeConfigured()) {
     return { exists: false };
   }
@@ -295,12 +283,6 @@ export async function loginWithPin(phone: string, pin: string): Promise<AuthUser
     throw new Error('El PIN debe tener 4 dígitos');
   }
   const normalized = normalizePhone(phone);
-  if (normalized === DEMO_PHONE) {
-    if (pin !== DEMO_PIN) throw new Error('PIN incorrecto');
-    accessToken = 'demo-session-token';
-    await storePhone(normalized);
-    return demoUser;
-  }
   if (!isInsforgeConfigured()) {
     throw new Error('Insforge no está configurado. Revisa tu .env');
   }
