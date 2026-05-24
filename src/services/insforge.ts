@@ -251,6 +251,7 @@ export async function registerWithPhone(
     phone: normalized,
     name,
     pinHash,
+    pin,
   });
   if (!res.ok) throw await parseError(res, 'No fue posible crear tu cuenta');
 
@@ -271,6 +272,7 @@ export async function loginWithPin(phone: string, pin: string): Promise<AuthUser
   const res = await postFunction('auth-login-pin', {
     phone: normalized,
     pinHash,
+    pin,
   });
   if (!res.ok) throw await parseError(res, 'No fue posible iniciar sesión');
 

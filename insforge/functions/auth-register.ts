@@ -18,6 +18,14 @@ function normalizePhone(input: string) {
   return clean.startsWith('57') ? `+${clean}` : `+57${clean}`;
 }
 
+async function sha256(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hash))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export default async function authRegister(request: Request): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (request.method !== 'POST') return json({ message: 'Method not allowed' }, 405);
@@ -25,7 +33,8 @@ export default async function authRegister(request: Request): Promise<Response> 
   const body = await request.json().catch(() => ({}));
   const normalized = normalizePhone(String(body.phone ?? ''));
   const name = String(body.name ?? '').trim();
-  const pinHash = String(body.pinHash ?? '');
+  const pin = String(body.pin ?? '');
+  const pinHash = String(body.pinHash ?? '') || (/^\d{4}$/.test(pin) ? await sha256(`${normalized}:${pin}`) : '');
   if (!/^\+57\d{10}$/.test(normalized)) return json({ message: 'Celular inválido' }, 400);
   if (name.length < 2) return json({ message: 'Ingresa tu nombre completo' }, 400);
   if (!pinHash) return json({ message: 'Clave inválida' }, 400);
