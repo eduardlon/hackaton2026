@@ -24,10 +24,14 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.NFC",
-        "android.permission.RECORD_AUDIO",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -66,14 +70,17 @@
         {
           "photosPermission": "FinGrow accede a tus fotos para leer facturas y preparar pagos rápidos.",
           "cameraPermission": "FinGrow usa la cámara para escanear facturas y extraer datos de pago.",
-          "microphonePermission": false
+          "microphonePermission": "FinGrow usa tu micrófono para hablar con el agente financiero IA."
         }
       ],
       "react-native-nfc-manager",
+      "@utapza/expo-mifare-scanner",
       [
         "expo-audio",
         {
-          "microphonePermission": "FinGrow usa tu micrófono para que puedas hablar con el agente financiero IA."
+          "microphonePermission": "FinGrow usa tu micrófono para que puedas hablar con el agente financiero IA.",
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": true
         }
       ]
     ],
@@ -83,8 +90,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": ""
+        "projectId": "ec69a4d0-59f2-4db6-af96-daba0d3bb217"
       }
-    }
+    },
+    "owner": "edik1023s-organization"
   }
 }

@@ -6,10 +6,6 @@ alwaysApply: true
 
 # InsForge SDK Documentation - Overview
 
-## Expo Version
-
-This project uses Expo SDK 54 (`expo ~54.0.0`). When working on Expo or React Native APIs, use the exact versioned docs at `https://docs.expo.dev/versions/v54.0.0/`.
-
 ## What is InsForge?
 
 Backend-as-a-service (BaaS) platform providing:

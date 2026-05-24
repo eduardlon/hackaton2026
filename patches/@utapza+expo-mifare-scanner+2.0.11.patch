@@ -1,0 +1,305 @@
+diff --git a/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/CardEmulationService.java b/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/CardEmulationService.java
+index bd997c3..6286840 100644
+--- a/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/CardEmulationService.java
++++ b/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/CardEmulationService.java
+@@ -40,9 +40,17 @@ public class CardEmulationService extends HostApduService {
+     // Changed for Type 4 NDEF support: Current selected file state
+     private static volatile int selectedFile = -1; // -1 = none, 0 = CC, 1 = NDEF
+     
++    // FinGrow private APDU commands:
++    // - 80 CB 00 00 02             -> payload length (2 bytes) + 9000
++    // - 80 CA <offsetHi> <offsetLo> <Le> -> payload chunk + 9000
++    private static final byte CLA_FINGROW = (byte) 0x80;
++    private static final byte INS_GET_PAYLOAD_LENGTH = (byte) 0xCB;
++    private static final byte INS_READ_PAYLOAD = (byte) 0xCA;
++
+     // Changed for Type 4 NDEF support: Store CC and NDEF file separately
+     private static volatile byte[] ccFile = null; // Capability Container (15 bytes)
+     private static volatile byte[] ndefFile = null; // NDEF file (NLEN + NDEF message)
++    private static volatile byte[] rawPayload = null; // JSON payload read directly by FinGrow APDU
+     private static volatile String cardUid = null;
+     private static final Object dataLock = new Object();
+     
+@@ -64,10 +72,12 @@ public class CardEmulationService extends HostApduService {
+         synchronized (dataLock) {
+             cardUid = uid;
+             selectedFile = -1; // Reset selected file
++            rawPayload = null;
+             
+             if (data != null && !data.isEmpty()) {
+                 try {
+                     byte[] ndefMessageBytes;
++                    rawPayload = data.getBytes(StandardCharsets.UTF_8);
+                     
+                     // Changed for Type 4 NDEF support: Check if data is hex (already NDEF encoded)
+                     if (isHexString(data)) {
+@@ -113,6 +123,7 @@ public class CardEmulationService extends HostApduService {
+                 Log.w(TAG, "Card data set - UID: " + uid + ", Data is empty - emulation will not work");
+                 ccFile = null;
+                 ndefFile = null;
++                rawPayload = null;
+             }
+         }
+     }
+@@ -218,6 +229,7 @@ public class CardEmulationService extends HostApduService {
+             cardUid = null;
+             ccFile = null;
+             ndefFile = null;
++            rawPayload = null;
+             selectedFile = -1;
+             Log.i(TAG, "Card data cleared (CC and NDEF files)");
+         }
+@@ -268,7 +280,7 @@ public class CardEmulationService extends HostApduService {
+         
+         // Check if card data is available
+         synchronized (dataLock) {
+-            if (ccFile == null || ndefFile == null || cardUid == null) {
++            if ((ccFile == null || ndefFile == null || cardUid == null) && rawPayload == null) {
+                 Log.w(TAG, "No card data available for emulation");
+                 // Still respond to SELECT AID to indicate service is available
+                 if (commandApdu.length >= 5 && commandApdu[0] == (byte) 0x00 && commandApdu[1] == (byte) 0xA4) {
+@@ -278,6 +290,46 @@ public class CardEmulationService extends HostApduService {
+             }
+         }
+ 
++        // FinGrow direct payload protocol. This avoids relying on Android's
++        // NDEF auto parsing for phone-to-phone HCE, which is unreliable on
++        // some Android 14/15 devices.
++        if (commandApdu.length >= 5 && commandApdu[0] == CLA_FINGROW && commandApdu[1] == INS_GET_PAYLOAD_LENGTH) {
++            synchronized (dataLock) {
++                if (rawPayload == null) {
++                    return WRONG_PARAMETERS;
++                }
++                int len = rawPayload.length;
++                return new byte[] {
++                    (byte) ((len >> 8) & 0xFF),
++                    (byte) (len & 0xFF),
++                    (byte) 0x90,
++                    (byte) 0x00
++                };
++            }
++        }
++
++        if (commandApdu.length >= 5 && commandApdu[0] == CLA_FINGROW && commandApdu[1] == INS_READ_PAYLOAD) {
++            synchronized (dataLock) {
++                if (rawPayload == null) {
++                    return WRONG_PARAMETERS;
++                }
++                int offset = ((commandApdu[2] & 0xFF) << 8) | (commandApdu[3] & 0xFF);
++                int length = commandApdu[4] & 0xFF;
++                if (length == 0) {
++                    length = 256;
++                }
++                if (offset < 0 || offset >= rawPayload.length) {
++                    return WRONG_PARAMETERS;
++                }
++                int actualLength = Math.min(length, rawPayload.length - offset);
++                byte[] response = new byte[actualLength + 2];
++                System.arraycopy(rawPayload, offset, response, 0, actualLength);
++                response[actualLength] = (byte) 0x90;
++                response[actualLength + 1] = (byte) 0x00;
++                return response;
++            }
++        }
++        
+         // Changed for Type 4 NDEF support: Handle SELECT AID command (Application Selection)
+         if (commandApdu.length >= 5 && commandApdu[0] == (byte) 0x00 && commandApdu[1] == (byte) 0xA4) {
+             // Check if this is SELECT AID (P1=04) or SELECT FILE (P1=00 or 0C)
+diff --git a/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/MifareScannerModule.kt b/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/MifareScannerModule.kt
+index 54d7ba8..29b0346 100644
+--- a/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/MifareScannerModule.kt
++++ b/node_modules/@utapza/expo-mifare-scanner/android/src/main/java/expo/modules/mifarescanner/MifareScannerModule.kt
+@@ -12,6 +12,49 @@ class MifareScannerModule : Module() {
+   private var currentActivity: Activity? = null
+   private var mifareScanner: MifareScanner? = null
+ 
++  /**
++   * Lazy initialization: si el módulo se creó antes de que la Activity
++   * estuviera lista (`mifareScanner == null`), reintentamos crearlo en cada
++   * llamada para que el usuario no quede bloqueado.
++   *
++   * IMPORTANTE: para `isNfcEnabled` consultamos el `NfcAdapter` directamente
++   * incluso si no hay Activity todavía, así NUNCA devolvemos falso negativo.
++   */
++  private fun ensureScanner(): MifareScanner? {
++    if (mifareScanner != null) return mifareScanner
++
++    if (nfcAdapter == null) {
++      nfcAdapter = try {
++        NfcAdapter.getDefaultAdapter(appContext.reactContext)
++      } catch (e: Exception) {
++        android.util.Log.e(TAG, "ensureScanner: getDefaultAdapter failed", e)
++        null
++      }
++    }
++
++    if (currentActivity == null) {
++      currentActivity = appContext.currentActivity
++    }
++
++    val adapter = nfcAdapter
++    val activity = currentActivity
++    if (adapter != null && activity != null) {
++      mifareScanner = MifareScanner(adapter, activity)
++      mifareScanner?.setOnCardScannedListener { uid, data, rawData, timestamp ->
++        sendEvent("onCardScanned", mapOf(
++          "uid" to uid,
++          "data" to data,
++          "rawData" to rawData,
++          "timestamp" to timestamp
++        ))
++      }
++      android.util.Log.i(TAG, "ensureScanner: created scanner lazily")
++    } else {
++      android.util.Log.w(TAG, "ensureScanner: adapter=$adapter activity=$activity — cannot init yet")
++    }
++    return mifareScanner
++  }
++
+   override fun definition() = ModuleDefinition {
+     Name("ExpoMifareScanner")
+ 
+@@ -19,7 +62,12 @@ class MifareScannerModule : Module() {
+ 
+     OnCreate {
+       currentActivity = appContext.currentActivity
+-      nfcAdapter = NfcAdapter.getDefaultAdapter(appContext.reactContext)
++      nfcAdapter = try {
++        NfcAdapter.getDefaultAdapter(appContext.reactContext)
++      } catch (e: Exception) {
++        android.util.Log.e(TAG, "OnCreate: getDefaultAdapter failed", e)
++        null
++      }
+ 
+       if (nfcAdapter != null && currentActivity != null) {
+         mifareScanner = MifareScanner(nfcAdapter!!, currentActivity!!)
+@@ -31,20 +79,26 @@ class MifareScannerModule : Module() {
+             "timestamp" to timestamp
+           ))
+         }
++      } else {
++        android.util.Log.w(TAG, "OnCreate: adapter=$nfcAdapter activity=$currentActivity — will lazy-init on first call")
+       }
+     }
+ 
+     OnActivityEntersForeground {
+       currentActivity = appContext.currentActivity
+-      mifareScanner?.updateActivity(currentActivity)
++      // Si el scanner no se pudo crear en OnCreate (Activity null), lo
++      // intentamos crear ahora que la Activity sí está lista.
++      if (mifareScanner == null) {
++        ensureScanner()
++      } else {
++        mifareScanner?.updateActivity(currentActivity)
++      }
+     }
+ 
+     Function("startScanning") {
+       try {
+-        val scanner = mifareScanner
+-        if (scanner == null) {
+-          throw Exception("MIFARE scanner is not initialized. NFC adapter may not be available.")
+-        }
++        val scanner = ensureScanner()
++          ?: throw Exception("MIFARE scanner is not initialized. NFC adapter may not be available.")
+         scanner.startScanning()
+       } catch (e: Exception) {
+         throw Exception("Failed to start NFC scanning: ${e.message}", e)
+@@ -55,14 +109,20 @@ class MifareScannerModule : Module() {
+       try {
+         mifareScanner?.stopScanning()
+       } catch (e: Exception) {
+-        // Log but don't throw - stopping is best effort
+         android.util.Log.e(TAG, "Error stopping scan: ${e.message}", e)
+       }
+     }
+ 
++    /**
++     * Consulta directa al NfcAdapter sin depender del scanner. Esto evita el
++     * falso negativo si el scanner no se pudo crear (Activity null en OnCreate).
++     */
+     Function("isNfcEnabled") {
+       try {
+-        mifareScanner?.isNfcEnabled() ?: false
++        if (nfcAdapter == null) {
++          nfcAdapter = NfcAdapter.getDefaultAdapter(appContext.reactContext)
++        }
++        nfcAdapter?.isEnabled ?: false
+       } catch (e: Exception) {
+         android.util.Log.e(TAG, "Error checking NFC status: ${e.message}", e)
+         false
+@@ -71,10 +131,8 @@ class MifareScannerModule : Module() {
+ 
+     Function("startCardEmulation") { uid: String, data: String ->
+       try {
+-        val scanner = mifareScanner
+-        if (scanner == null) {
+-          throw Exception("MIFARE scanner is not initialized. NFC adapter may not be available.")
+-        }
++        val scanner = ensureScanner()
++          ?: throw Exception("MIFARE scanner is not initialized. NFC adapter may not be available.")
+         scanner.startCardEmulation(uid, data)
+       } catch (e: Exception) {
+         throw Exception("Failed to start card emulation: ${e.message}", e)
+@@ -83,10 +141,8 @@ class MifareScannerModule : Module() {
+ 
+     Function("stopCardEmulation") {
+       try {
+-        val scanner = mifareScanner
+-        if (scanner == null) {
+-          throw Exception("MIFARE scanner is not initialized. NFC adapter may not be available.")
+-        }
++        val scanner = ensureScanner()
++          ?: throw Exception("MIFARE scanner is not initialized. NFC adapter may not be available.")
+         scanner.stopCardEmulation()
+       } catch (e: Exception) {
+         throw Exception("Failed to stop card emulation: ${e.message}", e)
+@@ -95,10 +151,7 @@ class MifareScannerModule : Module() {
+ 
+     Function("isCardEmulationActive") {
+       try {
+-        val scanner = mifareScanner
+-        if (scanner == null) {
+-          return@Function false
+-        }
++        val scanner = mifareScanner ?: return@Function false
+         scanner.isCardEmulationActive()
+       } catch (e: Exception) {
+         android.util.Log.e(TAG, "Error checking card emulation status: ${e.message}", e)
+diff --git a/node_modules/@utapza/expo-mifare-scanner/android/src/main/res/xml/apduservice.xml b/node_modules/@utapza/expo-mifare-scanner/android/src/main/res/xml/apduservice.xml
+index f4e5a14..32bd221 100644
+--- a/node_modules/@utapza/expo-mifare-scanner/android/src/main/res/xml/apduservice.xml
++++ b/node_modules/@utapza/expo-mifare-scanner/android/src/main/res/xml/apduservice.xml
+@@ -4,7 +4,7 @@
+     android:requireDeviceUnlock="false">
+     <aid-group android:description="@string/aid_group_description"
+         android:category="other">
+-        <!-- Changed for Type 4 NDEF support: NFC Forum Type 4 Tag Application AID -->
+-        <aid-filter android:name="D2760000850101"/>
++        <!-- FinGrow private AID: F0 + ASCII "FINGROW" -->
++        <aid-filter android:name="F046494E47524F57"/>
+     </aid-group>
+ </host-apdu-service>
+diff --git a/node_modules/@utapza/expo-mifare-scanner/app.plugin.js b/node_modules/@utapza/expo-mifare-scanner/app.plugin.js
+index 9b5109f..927e3ce 100644
+--- a/node_modules/@utapza/expo-mifare-scanner/app.plugin.js
++++ b/node_modules/@utapza/expo-mifare-scanner/app.plugin.js
+@@ -241,15 +241,15 @@ const withMifareScanner = (config) => {
+         console.log(`[expo-mifare-scanner] Copied apduservice.xml from ${sourceXml} to ${destXml}`);
+       } else {
+         // Create the file if it doesn't exist
+-        // Changed for Type 4 NDEF support: Use NFC Forum Type 4 Tag AID only
++        // FinGrow private AID: F0 + ASCII "FINGROW"
+         const apduContent = `<?xml version="1.0" encoding="utf-8"?>
+ <host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+     android:description="@string/apdu_service_description"
+     android:requireDeviceUnlock="false">
+     <aid-group android:description="@string/aid_group_description"
+         android:category="other">
+-        <!-- NFC Forum Type 4 Tag Application AID -->
+-        <aid-filter android:name="D2760000850101"/>
++        <!-- FinGrow private AID: F0 + ASCII "FINGROW" -->
++        <aid-filter android:name="F046494E47524F57"/>
+     </aid-group>
+ </host-apdu-service>
+ `;

@@ -2,10 +2,20 @@ import * as Haptics from 'expo-haptics';
 import { usePathname } from 'expo-router';
 import { CreditCard, Radio, X } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Modal, View } from 'react-native';
+import { ActivityIndicator, AppState, Modal, View, type AppStateStatus } from 'react-native';
 
-import { confirmNfcTransfer, type NfcTransferPayload } from '@/services/api';
-import { isNfcAvailable, startListeningForTransfer, stopListeningForTransfer } from '@/services/nfc';
+import {
+  confirmPaymentRequest,
+  getPaymentRequest,
+  type PaymentRequestDetails,
+  type PaymentRequestNfcToken,
+} from '@/services/api';
+import {
+  isNfcAvailable,
+  onEmulationStateChange,
+  startListeningForTransfer,
+  stopListeningForTransfer,
+} from '@/services/nfc';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 
@@ -24,16 +34,42 @@ export function NfcChargeDetector() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const [payload, setPayload] = useState<NfcTransferPayload | null>(null);
+  const [token, setToken] = useState<PaymentRequestNfcToken | null>(null);
+  const [paymentRequest, setPaymentRequest] = useState<PaymentRequestDetails | null>(null);
   const [status, setStatus] = useState<'idle' | 'confirming' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  // Pausamos el reader mode si nuestro propio celular est? emitiendo un cobro
+  // (HCE). Reader mode y card emulation no pueden coexistir de forma confiable
+  // en el mismo NFC controller.
+  const [isEmulating, setIsEmulating] = useState(false);
   const stopRef = useRef<(() => Promise<void>) | null>(null);
-  const lastReferenceRef = useRef<string | null>(null);
+  const lastTokenRef = useRef<string | null>(null);
 
+  // Suscripci?n al estado global de emulaci?n HCE.
+  useEffect(() => {
+    return onEmulationStateChange((emulating) => {
+      setIsEmulating(emulating);
+    });
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', setAppState);
+    return () => subscription.remove();
+  }, []);
+
+  // La app SIEMPRE est? en modo lectura cuando hay sesi?n, excepto cuando:
+  // - hay un token mostr?ndose
+  // - el usuario est? en la pantalla de cobro NFC (esa pantalla maneja sus
+  //   propios listeners y, si est? emitiendo, ya activ? HCE)
+  // - el usuario a?n no est? autenticado
+  // - nuestro propio celular est? emulando (HCE activo)
   const shouldListen =
     isAuthenticated &&
     Boolean(user?.id) &&
-    !payload &&
+    appState === 'active' &&
+    !token &&
+    !isEmulating &&
     !pathname.includes('nfc-transfer') &&
     !pathname.includes('(auth)');
 
@@ -42,28 +78,39 @@ export function NfcChargeDetector() {
 
     async function startAutoDetection() {
       if (!shouldListen) return;
-      const appState = AppState.currentState;
-      if (appState !== 'active') return;
 
       const available = await isNfcAvailable();
       if (!available || cancelled) return;
 
       stopRef.current = await startListeningForTransfer(
-        async (nextPayload) => {
+        async (nextToken) => {
           if (cancelled) return;
-          if (nextPayload.receiverUserId === user?.id) return;
-          if (lastReferenceRef.current === nextPayload.reference) return;
+          if (lastTokenRef.current === nextToken.token) return;
 
-          lastReferenceRef.current = nextPayload.reference;
+          lastTokenRef.current = nextToken.token;
           await stopListeningForTransfer();
           stopRef.current = null;
-          setPayload(nextPayload);
+          setToken(nextToken);
           setStatus('idle');
-          setMessage('');
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+          setMessage('Validando solicitud de pago...');
+          try {
+            const details = await getPaymentRequest({ token: nextToken.token });
+            if (details.receiver.id === user?.id) {
+              setToken(null);
+              setPaymentRequest(null);
+              setMessage('');
+              return;
+            }
+            setPaymentRequest(details);
+            setMessage('');
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+          } catch (error) {
+            setStatus('error');
+            setMessage(error instanceof Error ? error.message : 'Token NFC inv?lido o vencido.');
+          }
         },
         () => {
-          // Silencioso: el detector automático no debe molestar si NFC falla.
+          // Silencioso: el detector autom?tico no debe molestar si NFC falla.
         }
       );
     }
@@ -75,21 +122,26 @@ export function NfcChargeDetector() {
       stopRef.current?.().catch(() => {});
       stopRef.current = null;
     };
-  }, [payload, pathname, shouldListen, user?.id]);
+  }, [token, pathname, shouldListen, user?.id, isEmulating, appState]);
 
   const close = () => {
-    setPayload(null);
+    setToken(null);
+    setPaymentRequest(null);
     setStatus('idle');
     setMessage('');
   };
 
   const confirmPayment = async () => {
-    if (!payload || status === 'confirming') return;
+    if (!token || !paymentRequest || status === 'confirming') return;
 
     setStatus('confirming');
     setMessage('Confirmando pago NFC...');
     try {
-      const result = await confirmNfcTransfer(payload);
+      const result = await confirmPaymentRequest({
+        token: token.token,
+        confirmedByUser: true,
+        confirmationMethod: 'button',
+      });
       setStatus('success');
       setMessage(
         `Pagaste ${COP(result.amount)} a ${result.to.name}. Nuevo saldo: ${COP(
@@ -106,7 +158,7 @@ export function NfcChargeDetector() {
   };
 
   return (
-    <Modal visible={Boolean(payload)} transparent animationType="fade" onRequestClose={close}>
+    <Modal visible={Boolean(token)} transparent animationType="fade" onRequestClose={close}>
       <View
         style={{
           flex: 1,
@@ -165,7 +217,7 @@ export function NfcChargeDetector() {
             </PressableScale>
           </View>
 
-          {payload ? (
+          {paymentRequest ? (
             <View
               style={{
                 padding: 16,
@@ -175,12 +227,17 @@ export function NfcChargeDetector() {
               }}
             >
               <Text variant="micro" tone="muted">Te cobra</Text>
-              <Text variant="h2">{payload.receiverName}</Text>
+              <Text variant="h2">{paymentRequest.receiver.name}</Text>
               <Text variant="micro" tone="muted">Valor</Text>
-              <Text variant="h1">{COP(payload.amount)}</Text>
+              <Text variant="h1">{COP(paymentRequest.amount)}</Text>
               <Text variant="micro" tone="muted">Concepto</Text>
-              <Text variant="bodySmall">{payload.note || 'Cobro FinGrow'}</Text>
-              <Text variant="micro" tone="muted">Referencia: {payload.reference}</Text>
+              <Text variant="bodySmall">{paymentRequest.note || 'Cobro FinGrow'}</Text>
+              <Text variant="micro" tone="muted">
+                Expira: {new Date(paymentRequest.expiresAt).toLocaleTimeString('es-CO', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </Text>
             </View>
           ) : null}
 
@@ -210,7 +267,7 @@ export function NfcChargeDetector() {
             </PressableScale>
             <PressableScale
               onPress={confirmPayment}
-              disabled={status === 'confirming' || status === 'success'}
+              disabled={!paymentRequest || status === 'confirming' || status === 'success'}
               haptic="medium"
               style={{
                 flex: 1.35,

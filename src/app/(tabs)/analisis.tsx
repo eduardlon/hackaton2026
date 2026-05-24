@@ -11,9 +11,10 @@ import {
   Sparkles,
   TrendingUp,
   Wallet as WalletIcon,
+  X,
 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Dimensions, View } from 'react-native';
+import { Dimensions, Modal, ScrollView, View } from 'react-native';
 
 import {
   Badge,
@@ -58,6 +59,7 @@ const EMPTY_OVERVIEW: FinancialOverview = {
 };
 
 const EMPTY_PASSPORT: Passport = {
+  level: 0,
   levelName: 'Inicial',
   points: 0,
   nextLevel: 0,
@@ -236,6 +238,7 @@ export default function AnalisisScreen() {
   const { theme } = useTheme();
   const [period, setPeriod] = useState<Period>('mes');
   const [source, setSource] = useState<{ wallet: Wallet; passport: Passport; transactions: Transaction[] } | null>(null);
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -261,6 +264,18 @@ export default function AnalisisScreen() {
   const passport = analysis.passport;
 
   const totalExpenses = analysis.categories.reduce((acc, c) => acc + c.amount, 0);
+  const categoryDetails = analysis.categories.map((category) => {
+    const transactions =
+      source?.transactions
+        .filter((transaction) => transaction.amount < 0 && transaction.category === category.name)
+        .slice(0, 5) ?? [];
+
+    return {
+      ...category,
+      transactions,
+      count: transactions.length,
+    };
+  });
 
   const passportPct = passport.nextLevel > 0 ? Math.round((passport.points / passport.nextLevel) * 100) : 0;
 
@@ -399,6 +414,7 @@ export default function AnalisisScreen() {
         </View>
 
         <PressableScale
+          onPress={() => setCategoryModalVisible(true)}
           haptic="selection"
           scaleTo={0.98}
           style={{
@@ -417,6 +433,153 @@ export default function AnalisisScreen() {
           <ChevronRight size={14} color={theme.colors.primaryDark} />
         </PressableScale>
       </Card>
+
+      <Modal
+        visible={categoryModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCategoryModalVisible(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'flex-end',
+            backgroundColor: 'rgba(0,0,0,0.45)',
+          }}
+        >
+          <View
+            style={{
+              maxHeight: '82%',
+              margin: 16,
+              padding: 18,
+              borderRadius: theme.radii.xxl,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.borderSoft,
+              gap: 14,
+              ...theme.shadows.lg,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text variant="h3">Detalle por categoría</Text>
+                <Text variant="micro" tone="muted">
+                  Gastos de {analysis.label}: {formatMoney(totalExpenses)}
+                </Text>
+              </View>
+              <PressableScale
+                onPress={() => setCategoryModalVisible(false)}
+                haptic="light"
+                scaleTo={0.9}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.surfaceAlt,
+                }}
+              >
+                <X size={18} color={theme.colors.textMuted} />
+              </PressableScale>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 4 }}>
+              {categoryDetails.length ? (
+                categoryDetails.map((category) => (
+                  <View
+                    key={category.name}
+                    style={{
+                      padding: 14,
+                      borderRadius: theme.radii.xl,
+                      backgroundColor: theme.colors.surfaceAlt,
+                      gap: 10,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <View
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: 6,
+                          backgroundColor: category.color,
+                        }}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text variant="bodyStrong">{category.name}</Text>
+                        <Text variant="micro" tone="muted">
+                          {category.count ? `${category.count} movimientos visibles` : 'Sin movimientos recientes visibles'}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text variant="bodyStrong">{formatMoney(category.amount)}</Text>
+                        <Text variant="micro" tone="muted">{category.percentage}% del gasto</Text>
+                      </View>
+                    </View>
+
+                    <View
+                      style={{
+                        height: 8,
+                        borderRadius: 999,
+                        overflow: 'hidden',
+                        backgroundColor: theme.colors.borderSoft,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: `${Math.max(4, category.percentage)}%`,
+                          height: '100%',
+                          borderRadius: 999,
+                          backgroundColor: category.color,
+                        }}
+                      />
+                    </View>
+
+                    {category.transactions.length ? (
+                      <View style={{ gap: 8 }}>
+                        {category.transactions.map((transaction) => (
+                          <View
+                            key={transaction.id}
+                            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}
+                          >
+                            <View style={{ flex: 1 }}>
+                              <Text variant="caption" numberOfLines={1}>
+                                {transaction.title}
+                              </Text>
+                              <Text variant="micro" tone="muted" numberOfLines={1}>
+                                {transaction.subtitle || transaction.time}
+                              </Text>
+                            </View>
+                            <Text variant="caption" tone="danger">
+                              {formatMoney(Math.abs(transaction.amount))}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text variant="micro" tone="muted">
+                        Esta categoría viene del resumen mensual de tu billetera. Cuando registres movimientos, verás aquí cada pago.
+                      </Text>
+                    )}
+                  </View>
+                ))
+              ) : (
+                <View
+                  style={{
+                    padding: 18,
+                    borderRadius: theme.radii.xl,
+                    backgroundColor: theme.colors.surfaceAlt,
+                  }}
+                >
+                  <Text variant="bodySmall" tone="muted" align="center">
+                    Todavía no hay categorías de gasto para mostrar en este periodo.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Evolución mensual */}
       <Card delay={200} padded style={{ padding: 18, gap: 10, marginBottom: 14 }}>

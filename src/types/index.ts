@@ -43,6 +43,7 @@ export type ActiveLoan = {
 };
 
 export type Passport = {
+  level: number;
   levelName: string;
   points: number;
   nextLevel: number;

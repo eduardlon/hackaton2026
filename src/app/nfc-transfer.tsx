@@ -27,20 +27,28 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PressableScale, Text } from '@/components';
-import { confirmNfcTransfer, type NfcTransferPayload } from '@/services/api';
+import {
+  confirmPaymentRequest,
+  createPaymentRequest,
+  getPaymentRequest,
+  type PaymentRequestDetails,
+  type PaymentRequestNfcToken,
+} from '@/services/api';
 import {
   cancelNfc,
-  createTransferReference,
+  emulateChargePayload,
+  getHceStatus,
   isNfcAvailable,
   startListeningForTransfer,
+  stopChargeEmulation,
   stopListeningForTransfer,
-  writeTransferPayload,
+  type HceStatus,
 } from '@/services/nfc';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 
 type Mode = 'select' | 'receive' | 'pay' | 'qr';
-type Status = 'idle' | 'amount' | 'scanning' | 'success' | 'error';
+type Status = 'idle' | 'amount' | 'scanning' | 'confirm' | 'success' | 'error';
 
 const COP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
@@ -54,8 +62,10 @@ export default function NfcTransferScreen() {
   const [mode, setMode] = useState<Mode>('select');
   const [status, setStatus] = useState<Status>('idle');
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [hceStatus, setHceStatus] = useState<HceStatus | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
-  const [receivedPayload, setReceivedPayload] = useState<NfcTransferPayload | null>(null);
+  const [nfcToken, setNfcToken] = useState<PaymentRequestNfcToken | null>(null);
+  const [paymentRequest, setPaymentRequest] = useState<PaymentRequestDetails | null>(null);
   const [amountInput, setAmountInput] = useState('10000');
   const [noteInput, setNoteInput] = useState('Cobro FinGrow');
 
@@ -66,17 +76,29 @@ export default function NfcTransferScreen() {
   const ring1 = useSharedValue(0);
   const ring2 = useSharedValue(0);
 
+  // Re-chequeo del estado HCE/NFC: al montar y cada vez que entra en modo
+  // "receive" (por si el usuario abrió ajustes y activó NFC).
+  const refreshNfcStatus = async () => {
+    const [ok, hce] = await Promise.all([isNfcAvailable(), getHceStatus()]);
+    setAvailable(ok);
+    setHceStatus(hce);
+  };
+
   useEffect(() => {
-    (async () => {
-      const ok = await isNfcAvailable();
-      setAvailable(ok);
-    })();
+    refreshNfcStatus();
     return () => {
       cancelRef.current = true;
       stopListenRef.current?.().catch(() => {});
+      stopChargeEmulation().catch(() => {});
       cancelNfc().catch(() => {});
     };
   }, []);
+
+  useEffect(() => {
+    if (mode === 'receive' || mode === 'pay') {
+      refreshNfcStatus();
+    }
+  }, [mode]);
 
   useEffect(() => {
     if (status === 'scanning') {
@@ -103,11 +125,12 @@ export default function NfcTransferScreen() {
     transform: [{ scale: 0.7 + ring2.value * 1.2 }],
   }));
 
-  const scanningTitle = mode === 'pay' ? 'Buscando cobro NFC' : 'Cobro NFC activo';
+  const scanningTitle = mode === 'pay' ? 'Buscando cobro NFC' : 'Emitiendo cobro NFC';
 
   const close = () => {
     cancelRef.current = true;
     stopListenRef.current?.().catch(() => {});
+    stopChargeEmulation().catch(() => {});
     cancelNfc().catch(() => {});
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
@@ -129,29 +152,29 @@ export default function NfcTransferScreen() {
       return;
     }
 
-    setStatus('scanning');
-    setResultMessage('Cobro activo. El pagador debe abrir “Pagar cobro NFC”, acercar su celular y confirmar.');
-    const reference = await createTransferReference();
-    const payload: NfcTransferPayload = {
-      kind: 'fingrow.nfc.charge',
-      receiverUserId: user.id,
-      receiverName: user.name,
-      amount,
-      reference,
-      note: noteInput.trim() || 'Cobro FinGrow',
-      createdAt: new Date().toISOString(),
-    };
-    setReceivedPayload(payload);
+    // Re-verificamos el estado justo antes de intentar (por si el usuario
+    // acaba de activar NFC en ajustes). Pero NO bloqueamos: dejamos que
+    // emulateChargePayload haga la verificación final y nos dé el error real.
+    await refreshNfcStatus();
 
+    setStatus('scanning');
+    setResultMessage(
+      'Tu celular está emitiendo el cobro por NFC. Pídele al pagador que acerque su celular (con la app FinGrow abierta) — verá un aviso para confirmar el pago.'
+    );
     try {
-      await writeTransferPayload(payload);
+      const created = await createPaymentRequest({
+        amount,
+        currency: 'COP',
+        note: noteInput.trim() || 'Cobro FinGrow',
+      });
+      setPaymentRequest(created.paymentRequest);
+      setNfcToken(created.nfcToken);
+      await emulateChargePayload(created.nfcToken);
       if (cancelRef.current) return;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setStatus('success');
-      setResultMessage(`Cobro NFC de ${COP(amount)} compartido. Cuando el pagador confirme, se descuenta de su billetera y se acredita a la tuya.`);
     } catch (err) {
       if (cancelRef.current) return;
-      const msg = err instanceof Error ? err.message : 'No fue posible compartir el cobro NFC';
+      const msg = err instanceof Error ? err.message : 'No fue posible activar el cobro NFC';
       setStatus('error');
       setResultMessage(msg);
     }
@@ -162,27 +185,16 @@ export default function NfcTransferScreen() {
     setResultMessage('Acerca tu celular al cobrador para leer la factura NFC. Luego confirmamos el pago desde tu sesión.');
     try {
       stopListenRef.current = await startListeningForTransfer(
-        async (payload) => {
+        async (token) => {
           if (cancelRef.current) return;
           await stopListeningForTransfer();
           stopListenRef.current = null;
-          setReceivedPayload(payload);
-          try {
-            const res = await confirmNfcTransfer(payload);
-            if (cancelRef.current) return;
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-            setStatus('success');
-            setResultMessage(
-              res.status === 'completed'
-                ? `Pagaste ${COP(payload.amount)} a ${payload.receiverName}. Se descontó de tu billetera y se acreditó al cobrador.`
-                : 'Pago leído — pendiente de confirmación.'
-            );
-          } catch (err) {
-            if (cancelRef.current) return;
-            const msg = err instanceof Error ? err.message : 'No fue posible confirmar';
-            setStatus('error');
-            setResultMessage(msg);
-          }
+          setNfcToken(token);
+          const details = await getPaymentRequest({ token: token.token });
+          setPaymentRequest(details);
+          setStatus('confirm');
+          setResultMessage(null);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
         },
         (err) => {
           if (cancelRef.current) return;
@@ -198,14 +210,43 @@ export default function NfcTransferScreen() {
     }
   };
 
+  const confirmReceivedPayment = async () => {
+    if (!nfcToken || !paymentRequest) return;
+
+    setStatus('scanning');
+    setResultMessage('Confirmando pago NFC...');
+    try {
+      const res = await confirmPaymentRequest({
+        token: nfcToken.token,
+        confirmedByUser: true,
+        confirmationMethod: 'button',
+      });
+      if (cancelRef.current) return;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setStatus('success');
+      setResultMessage(
+        res.status === 'completed'
+          ? `Pagaste ${COP(paymentRequest.amount)} a ${paymentRequest.receiver.name}. Se descontó de tu billetera y se acreditó al cobrador.`
+          : 'Pago leído — pendiente de confirmación.'
+      );
+    } catch (err) {
+      if (cancelRef.current) return;
+      const msg = err instanceof Error ? err.message : 'No fue posible confirmar';
+      setStatus('error');
+      setResultMessage(msg);
+    }
+  };
+
   const resetFlow = () => {
     stopListenRef.current?.().catch(() => {});
+    stopChargeEmulation().catch(() => {});
     cancelNfc().catch(() => {});
     stopListenRef.current = null;
     setStatus('idle');
     setMode('select');
     setResultMessage(null);
-    setReceivedPayload(null);
+    setNfcToken(null);
+    setPaymentRequest(null);
   };
 
   return (
@@ -466,9 +507,41 @@ export default function NfcTransferScreen() {
             style={{ marginTop: 12, gap: 18 }}
           >
             <Text variant="body" tone="muted">
-              Define el valor y activa una factura NFC. El pagador abre la app, lee el cobro,
-              confirma y el dinero se descuenta de su billetera para acreditarse a la tuya.
+              Define el valor del cobro. Tu celular emite la factura por NFC y al pagador,
+              con solo tener la app FinGrow abierta, le aparece un aviso para confirmar.
+              El dinero se descuenta de su billetera y se acredita a la tuya.
             </Text>
+            {hceStatus && !hceStatus.available ? (
+              <View
+                style={{
+                  padding: 12,
+                  borderRadius: theme.radii.lg,
+                  backgroundColor: theme.colors.warnSoft,
+                  gap: 8,
+                }}
+              >
+                <Text variant="micro">
+                  {hceStatus.message ||
+                    'No fue posible verificar HCE en este momento. Igual puedes intentar emitir el cobro.'}
+                </Text>
+                <PressableScale
+                  onPress={refreshNfcStatus}
+                  haptic="light"
+                  style={{
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: theme.radii.md,
+                    borderWidth: 1,
+                    borderColor: theme.colors.warn,
+                  }}
+                >
+                  <Text variant="micro" tone="warn">
+                    Reintentar diagnóstico
+                  </Text>
+                </PressableScale>
+              </View>
+            ) : null}
 
             <View style={{ gap: 10 }}>
               <Text variant="micro" tone="muted">Valor a cobrar</Text>
@@ -535,15 +608,17 @@ export default function NfcTransferScreen() {
                   <Radio size={24} color="#0E0F0E" strokeWidth={2.4} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text variant="h3">Factura NFC lista</Text>
+                  <Text variant="h3">Listo para emitir</Text>
                   <Text variant="bodySmall" tone="muted">
                     Cobrarás {COP(getChargeAmount() || 0)} por {noteInput || 'Cobro FinGrow'}.
                   </Text>
                 </View>
               </View>
               <Text variant="micro" tone="muted">
-                No compartimos PIN ni token por NFC. Solo compartimos monto, referencia y
-                receptor. El pagador confirma desde su propia sesión.
+                Tu celular emulará una tarjeta NFC con el cobro. El pagador no necesita
+                tocar nada — solo acerca su celular con la app abierta y confirma.
+                No compartimos PIN ni datos sensibles: NFC solo transporta un token temporal
+                que el backend valida antes de mover dinero.
               </Text>
             </View>
 
@@ -563,7 +638,7 @@ export default function NfcTransferScreen() {
               }}
             >
               <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 17, color: '#0E0F0E' }}>
-                Activar factura NFC
+                Emitir cobro por NFC
               </Text>
               <ArrowDownLeft size={20} color="#0E0F0E" />
             </PressableScale>
@@ -592,8 +667,10 @@ export default function NfcTransferScreen() {
             style={{ marginTop: 12, gap: 18 }}
           >
             <Text variant="body" tone="muted">
-              Abre este modo frente al cobrador. Al leer la factura NFC, confirmamos con tu sesión:
-              se descuenta de tu billetera y se acredita al receptor.
+              Con la app FinGrow abierta, acerca tu celular al del cobrador y aparecerá
+              automáticamente un aviso para confirmar el pago. Este modo es opcional:
+              te ayuda a hacer la lectura más rápida si el detector automático no
+              respondió.
             </Text>
             <View
               style={{
@@ -738,6 +815,104 @@ export default function NfcTransferScreen() {
           </View>
         ) : null}
 
+        {status === 'confirm' && paymentRequest ? (
+          <MotiView
+            from={{ opacity: 0, translateY: 12 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: 'timing', duration: 280 }}
+            style={{ marginTop: 24, gap: 16 }}
+          >
+            <View
+              style={{
+                padding: 18,
+                borderRadius: theme.radii.xl,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1.5,
+                borderColor: theme.colors.primary,
+                gap: 14,
+                ...theme.shadows.sm,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View
+                  style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: 23,
+                    backgroundColor: theme.colors.primarySoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <CreditCard size={24} color={theme.colors.primaryDark} strokeWidth={2.4} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text variant="h3">Confirmar pago NFC</Text>
+                  <Text variant="bodySmall" tone="muted">
+                    Revisa el cobro antes de descontar dinero de tu billetera.
+                  </Text>
+                </View>
+              </View>
+
+              <View
+                style={{
+                  padding: 16,
+                  borderRadius: theme.radii.lg,
+                  backgroundColor: theme.colors.primarySoft,
+                  gap: 6,
+                }}
+              >
+                <Text variant="micro" tone="muted">Te cobra</Text>
+                <Text variant="h2">{paymentRequest.receiver.name}</Text>
+                <Text variant="micro" tone="muted">Valor</Text>
+                <Text variant="h1">{COP(paymentRequest.amount)}</Text>
+                <Text variant="micro" tone="muted">Concepto</Text>
+                <Text variant="bodySmall">{paymentRequest.note || 'Cobro FinGrow'}</Text>
+                <Text variant="micro" tone="muted">
+                  Expira: {new Date(paymentRequest.expiresAt).toLocaleTimeString('es-CO', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <PressableScale
+                onPress={resetFlow}
+                haptic="light"
+                style={{
+                  flex: 1,
+                  height: 56,
+                  borderRadius: theme.radii.xl,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1.5,
+                  borderColor: theme.colors.border,
+                }}
+              >
+                <Text tone="muted">Cancelar</Text>
+              </PressableScale>
+              <PressableScale
+                onPress={confirmReceivedPayment}
+                haptic="medium"
+                style={{
+                  flex: 1.4,
+                  height: 56,
+                  borderRadius: theme.radii.xl,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.primary,
+                }}
+              >
+                <Text style={{ fontFamily: 'Inter_700Bold', color: '#0E0F0E' }}>
+                  Confirmar pago
+                </Text>
+              </PressableScale>
+            </View>
+          </MotiView>
+        ) : null}
+
         {status === 'success' ? (
           <MotiView
             from={{ opacity: 0, scale: 0.94 }}
@@ -764,7 +939,7 @@ export default function NfcTransferScreen() {
             <Text variant="body" tone="muted" align="center">
               {resultMessage}
             </Text>
-            {receivedPayload ? (
+            {paymentRequest ? (
               <View
                 style={{
                   width: '100%',
@@ -777,7 +952,7 @@ export default function NfcTransferScreen() {
                 <Text variant="micro" tone="muted">
                   Referencia
                 </Text>
-                <Text variant="bodySmall">{receivedPayload.reference}</Text>
+                <Text variant="bodySmall">{paymentRequest.id}</Text>
               </View>
             ) : null}
             <PressableScale

@@ -278,6 +278,73 @@ export default function CreditoScreen() {
           </Text>
         </View>
 
+        {creditProfile?.activeCredit ? (
+          <View
+            style={{
+              padding: 14,
+              borderRadius: theme.radii.lg,
+              backgroundColor: theme.colors.surfaceAlt,
+              borderWidth: 1,
+              borderColor: theme.colors.borderSoft,
+              gap: 10,
+            }}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ flex: 1 }}>
+                <Text variant="bodyStrong">Crédito activo</Text>
+                <Text variant="micro" tone="muted">
+                  Llevas pagado{' '}
+                  <Text variant="micro" tone="primary">
+                    {formatMoney(creditProfile.activeCredit.paidAmount)}
+                  </Text>{' '}
+                  de {formatMoney(creditProfile.activeCredit.originalAmount)}
+                </Text>
+              </View>
+              <View
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 999,
+                  backgroundColor: theme.colors.primary,
+                }}
+              >
+                <Text style={{ fontFamily: 'Inter_700Bold', color: '#0E0F0E', fontSize: 13 }}>
+                  {creditProfile.activeCredit.progressPct}%
+                </Text>
+              </View>
+            </View>
+
+            <ProgressBar
+              value={creditProfile.activeCredit.progressPct}
+              duration={900}
+              delay={150}
+            />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Text variant="micro" tone="muted">Saldo pendiente</Text>
+                <Text variant="bodyStrong" numberOfLines={1} adjustsFontSizeToFit>
+                  {formatMoney(creditProfile.activeCredit.outstandingBalance)}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text variant="micro" tone="muted">Cuota mensual</Text>
+                <Text variant="bodyStrong" numberOfLines={1} adjustsFontSizeToFit>
+                  {formatMoney(creditProfile.activeCredit.monthlyPayment)}
+                </Text>
+              </View>
+              {creditProfile.activeCredit.paymentsRemaining > 0 ? (
+                <View style={{ flex: 1 }}>
+                  <Text variant="micro" tone="muted">Cuotas restantes</Text>
+                  <Text variant="bodyStrong">
+                    {creditProfile.activeCredit.paymentsRemaining}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
         {disbursedAmount > 0 ? (
           <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.primarySoft }}>
             <Text variant="bodySmall" tone="primary">

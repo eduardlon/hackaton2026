@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   Bell,
@@ -35,6 +36,9 @@ import { useAuthStore } from '@/store/authStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useTheme } from '@/theme';
 import { formatMoney } from '@/utils/format';
+import { getCreditProfile, getPassport, getTransactions } from '@/services/api';
+import type { CreditProfileResponse } from '@/services/api';
+import type { Passport } from '@/types';
 
 const MENU_ITEMS = [
   { id: 'pasaporte', label: 'Mi Pasaporte Financiero', Icon: ShieldCheck },
@@ -56,12 +60,40 @@ export default function PerfilScreen() {
     phone: authUser?.phone ?? 'Celular no disponible',
     type: authUser?.type ?? 'Cuenta FinGrow',
     email: authUser?.email ?? 'Sin correo registrado',
-    level: 'Sin perfil financiero',
-    points: 0,
   };
   const signOut = useAuthStore((s) => s.signOut);
 
   const prefs = usePreferencesStore();
+
+  const [passport, setPassport] = useState<Passport | null>(null);
+  const [creditProfile, setCreditProfile] = useState<CreditProfileResponse | null>(null);
+  const [billCount, setBillCount] = useState(0);
+
+  useEffect(() => {
+    loadProfileData();
+  }, []);
+
+  async function loadProfileData() {
+    try {
+      const [p, c, txs] = await Promise.all([
+        getPassport(),
+        getCreditProfile(),
+        getTransactions(),
+      ]);
+      setPassport(p);
+      setCreditProfile(c);
+      setBillCount(txs.filter((tx) => tx.category === 'Factura').length);
+    } catch {
+      console.warn('[perfil] no se pudieron cargar datos desde InsForge');
+    }
+  }
+
+  const level = passport
+    ? `Nivel ${passport.level} — ${passport.levelName}`
+    : 'Sin perfil financiero';
+  const points = passport?.points ?? 0;
+  const monthlyPoints = passport?.monthlyPoints ?? 0;
+  const estimatedCredit = creditProfile?.availableAmount ?? 0;
 
   const handleSignOut = async () => {
     await signOut();
@@ -201,7 +233,7 @@ export default function PerfilScreen() {
             </Text>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               <Badge label="Verificado" tone="primary" icon={ShieldCheck} />
-              <Badge label={user.level} tone="primary" icon={ShieldCheck} />
+              <Badge label={level} tone="primary" icon={ShieldCheck} />
             </View>
           </View>
         </View>
@@ -216,11 +248,11 @@ export default function PerfilScreen() {
         >
           <View style={{ flex: 1, alignItems: 'center', gap: 4 }}>
             <Star size={18} color={theme.colors.primaryDark} fill={theme.colors.primaryDark} />
-            <Text variant="bodyStrong">{user.points}</Text>
+            <Text variant="bodyStrong">{points}</Text>
             <Text variant="micro" tone="muted">
               Puntos
             </Text>
-            <PointsBadge value={35} delay={300} />
+            <PointsBadge value={monthlyPoints} delay={300} />
           </View>
           <View
             style={{
@@ -232,7 +264,7 @@ export default function PerfilScreen() {
           <View style={{ flex: 1, alignItems: 'center', gap: 4 }}>
             <TrendingUp size={18} color={theme.colors.primaryDark} />
             <Text variant="bodyStrong" numberOfLines={1}>
-              {formatMoney(800000)}
+              {estimatedCredit > 0 ? formatMoney(estimatedCredit) : '—'}
             </Text>
             <Text variant="micro" tone="muted">
               Crédito estimado
@@ -250,7 +282,7 @@ export default function PerfilScreen() {
           />
           <View style={{ flex: 1, alignItems: 'center', gap: 4 }}>
             <FileText size={18} color={theme.colors.primaryDark} />
-            <Text variant="bodyStrong">12</Text>
+            <Text variant="bodyStrong">{billCount}</Text>
             <Text variant="micro" tone="muted">
               Facturas pagadas
             </Text>

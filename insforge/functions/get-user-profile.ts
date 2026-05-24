@@ -1,3 +1,7 @@
+Function: Get User Profile (get-user-profile)
+Status:   active
+Desc:     Returns isolated complete profile data for the authenticated FinGrow user.
+---
 module.exports = async function(request) {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -24,94 +28,64 @@ module.exports = async function(request) {
     });
 
     const { data: user, error: userError } = await client.database
-      .from('phone_users')
-      .select('id, name, type')
+      .from('demo_users')
+      .select('id, name, email, phone, document_number, user_type, role, created_at, updated_at')
       .eq('id', userId)
       .single();
 
     if (userError || !user) {
-      return json({ error: { code: 'USER_NOT_FOUND', message: 'No se encontró el usuario.' } }, 404, corsHeaders);
+      return json({ error: { code: 'USER_NOT_FOUND', message: 'No se encontró el perfil del usuario.' } }, 404, corsHeaders);
     }
 
-    const { data: wallet, error: walletError } = await client.database
-      .from('wallets')
-      .select('user_id, balance, currency, monthly_income, monthly_expenses, pending_bills')
+    const { data: wallet } = await client.database
+      .from('wallet_accounts')
+      .select('balance, currency, status, monthly_income, monthly_expenses, pending_bills')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
-    if (walletError || !wallet) {
-      return json({ error: { code: 'WALLET_NOT_FOUND', message: 'No se encontró la billetera del usuario.' } }, 404, corsHeaders);
-    }
-
-    const { data: passport, error: passportError } = await client.database
-      .from('passports')
-      .select('points, level, level_name, next_level_points, progress_percentage, next_benefit')
+    const { data: passport } = await client.database
+      .from('financial_passports')
+      .select('points, level, level_name, risk_band, next_level_points, progress_percentage, next_benefit')
       .eq('user_id', userId)
-      .single();
-
-    if (passportError || !passport) {
-      return json({ error: { code: 'PASSPORT_NOT_FOUND', message: 'No se encontró el Pasaporte Financiero.' } }, 404, corsHeaders);
-    }
-
-    const { data: transactions, error: transactionsError } = await client.database
-      .from('transactions')
-      .select('id, type, amount, category, description, status, created_at')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    if (transactionsError) {
-      return json({ error: { code: 'TRANSACTIONS_ERROR', message: 'No se pudieron cargar los movimientos recientes.' } }, 500, corsHeaders);
-    }
+      .maybeSingle();
 
     return json({
       user: {
         id: user.id,
         name: user.name,
-        type: user.type
+        email: user.email,
+        phone: user.phone,
+        documentNumber: user.document_number,
+        type: user.user_type,
+        role: user.role,
+        createdAt: user.created_at,
+        updatedAt: user.updated_at
       },
-      wallet: {
+      wallet: wallet ? {
         balance: wallet.balance,
         currency: wallet.currency,
+        status: wallet.status,
         monthlyIncome: wallet.monthly_income,
         monthlyExpenses: wallet.monthly_expenses,
         pendingBills: wallet.pending_bills
-      },
-      passport: {
+      } : null,
+      passport: passport ? {
         points: passport.points,
         level: passport.level,
         levelName: passport.level_name,
+        riskBand: passport.risk_band,
         nextLevelPoints: passport.next_level_points,
         progressPercentage: passport.progress_percentage,
         nextBenefit: passport.next_benefit
-      },
-      recentTransactions: (transactions || []).map((transaction) => ({
-        id: transaction.id,
-        type: transaction.type,
-        amount: transaction.amount,
-        currency: wallet.currency || 'COP',
-        category: transaction.category,
-        description: transaction.description,
-        status: transaction.status,
-        createdAt: transaction.created_at
-      }))
+      } : null
     }, 200, corsHeaders);
   } catch (error) {
-    return json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: error?.message || 'Error inesperado cargando la home financiera.'
-      }
-    }, 500, corsHeaders);
+    return json({ error: { code: 'INTERNAL_ERROR', message: error?.message || 'Error inesperado cargando perfil.' } }, 500, corsHeaders);
   }
 };
 
 async function safeJson(request) {
-  try {
-    return await request.json();
-  } catch (_) {
-    return {};
-  }
+  try { return await request.json(); } catch (_) { return {}; }
 }
 
 function resolveUserId(request, body) {
@@ -137,12 +111,6 @@ function decodeJwtSub(payload) {
 }
 
 function json(payload, status, corsHeaders) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: {
-      ...corsHeaders,
-      'Content-Type': 'application/json'
-    }
-  });
+  return new Response(JSON.stringify(payload), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 

@@ -23,7 +23,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -551,11 +551,72 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
     router.push('/financial-agent');
   };
 
+  const ensureMicPermission = async (): Promise<boolean> => {
+    try {
+      // 1) consultar el estado actual sin pedir todavía
+      const status = await AudioModule.getRecordingPermissionsAsync();
+      if (status.granted) return true;
+
+      // 2) si Android marcó "no volver a preguntar", abrir settings
+      if (status.canAskAgain === false) {
+        Alert.alert(
+          'Permiso de micrófono bloqueado',
+          'FinGrow necesita acceso al micrófono para que puedas hablar con la IA. Actívalo en Ajustes → Aplicaciones → FinGrow → Permisos → Micrófono.',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            {
+              text: 'Abrir ajustes',
+              onPress: () => {
+                Linking.openSettings().catch(() => {});
+              },
+            },
+          ]
+        );
+        return false;
+      }
+
+      // 3) pedir el permiso (dispara el dialog nativo)
+      const requested = await AudioModule.requestRecordingPermissionsAsync();
+      if (!requested.granted) {
+        if (requested.canAskAgain === false) {
+          Alert.alert(
+            'Permiso de micrófono bloqueado',
+            'Tendrás que activarlo manualmente desde Ajustes → Aplicaciones → FinGrow → Permisos → Micrófono.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Abrir ajustes',
+                onPress: () => {
+                  Linking.openSettings().catch(() => {});
+                },
+              },
+            ]
+          );
+        }
+        return false;
+      }
+      return true;
+    } catch (err) {
+      if (__DEV__) console.warn('[mic-permission]', err);
+      return false;
+    }
+  };
+
   const startVoiceAI = async () => {
     if (voiceRecordingRef.current) return;
 
     voiceLongPressRef.current = true;
     setQuickMenuVisible(false);
+
+    // Pedir el permiso ANTES de mostrar el modal de voz — si abrimos el modal
+    // primero, en algunos Androids el modal de RN tapa el dialog del sistema
+    // y el usuario no ve que se le está pidiendo permiso.
+    const hasPermission = await ensureMicPermission();
+    if (!hasPermission) {
+      voiceLongPressRef.current = false;
+      return;
+    }
+
     setVoiceVisible(true);
     setVoiceStatus('recording');
     setVoiceTranscript('');
@@ -563,11 +624,6 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
     setVoiceError('');
 
     try {
-      const permission = await AudioModule.requestRecordingPermissionsAsync();
-      if (!permission.granted) {
-        throw new Error('Necesito permiso de micrófono para escuchar tu pregunta.');
-      }
-
       await setAudioModeAsync({
         allowsRecording: true,
         playsInSilentMode: true,
@@ -579,7 +635,13 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
     } catch (error) {
       voiceRecordingRef.current = false;
       setVoiceStatus('error');
-      setVoiceError(error instanceof Error ? error.message : 'No pude iniciar la grabación.');
+      const message =
+        error instanceof Error ? error.message : 'No pude iniciar la grabación.';
+      setVoiceError(
+        Platform.OS === 'android'
+          ? `${message} Revisa que el micrófono no esté siendo usado por otra app.`
+          : message
+      );
     }
   };
 

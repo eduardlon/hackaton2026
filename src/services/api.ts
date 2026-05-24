@@ -1,5 +1,6 @@
 import {
   getAccessToken,
+  getSessionUserId,
   invokeFunction,
 } from '@/services/insforge';
 import type {
@@ -59,6 +60,19 @@ type PassportResponse = {
   }[];
 };
 
+export type ActiveCreditInfo = {
+  id: string | null;
+  originalAmount: number;
+  paidAmount: number;
+  outstandingBalance: number;
+  monthlyPayment: number;
+  months: number;
+  paymentsMade: number;
+  paymentsRemaining: number;
+  progressPct: number;
+  disbursedAt: string | null;
+};
+
 export type CreditProfileResponse = {
   availableAmount: number;
   maxAmount: number;
@@ -69,6 +83,7 @@ export type CreditProfileResponse = {
   level: string;
   nextTierAmount: number;
   pointsToNextTier: number;
+  activeCredit?: ActiveCreditInfo | null;
 };
 
 type ObtainCreditResponse = {
@@ -97,6 +112,35 @@ type TransferNfcResponse = {
   to: { id: string; name: string };
   payerWallet?: ConfirmBillPaymentResponse['wallet'];
   receiverWallet?: ConfirmBillPaymentResponse['wallet'];
+};
+
+export type PaymentRequestNfcToken = {
+  kind: 'fingrow.payment-request-token';
+  version: 1;
+  paymentRequestId: string;
+  token: string;
+  expiresAt: string;
+};
+
+export type PaymentRequestDetails = {
+  id: string;
+  receiver: { id: string; name: string; phone?: string };
+  amount: number;
+  currency: 'COP' | string;
+  note?: string | null;
+  status: 'pending' | 'processing' | 'completed' | 'expired' | 'cancelled' | string;
+  expiresAt: string;
+  createdAt?: string;
+};
+
+export type CreatePaymentRequestResponse = {
+  paymentRequest: PaymentRequestDetails;
+  nfcToken: PaymentRequestNfcToken;
+};
+
+export type ConfirmPaymentRequestResponse = TransferNfcResponse & {
+  paymentRequest: PaymentRequestDetails;
+  reference: string;
 };
 
 type BrebPaymentResponse = {
@@ -290,6 +334,7 @@ function mapWalletHome(res: WalletHomeResponse): {
   };
 
   const passport: Passport = {
+    level: res.passport.level,
     levelName: res.passport.levelName,
     points: res.passport.points,
     nextLevel: res.passport.nextLevelPoints,
@@ -359,6 +404,7 @@ export async function getPassport(): Promise<Passport> {
   }
   const data = await invokeFunction<PassportResponse>('get-passport', {});
   return {
+    level: data.level,
     levelName: data.levelName,
     points: data.points,
     nextLevel: data.nextLevelPoints,
@@ -369,6 +415,7 @@ export async function getPassport(): Promise<Passport> {
 }
 
 function mapCreditProfileToCredit(profile: CreditProfileResponse): Credit {
+  const active = profile.activeCredit ?? null;
   return {
     estimatedAmount: profile.availableAmount,
     safeMonthlyPayment: profile.safeMonthlyPayment,
@@ -378,18 +425,29 @@ function mapCreditProfileToCredit(profile: CreditProfileResponse): Credit {
     eligibility: profile.eligibility,
     potentialAmount: profile.nextTierAmount || profile.maxAmount,
     level: profile.level,
-    activeLoan: profile.usedAmount > 0
+    activeLoan: active
       ? {
-          id: '',
-          originalAmount: profile.usedAmount,
-          paidAmount: 0,
-          outstandingBalance: profile.usedAmount,
-          progressPercentage: 0,
-          nextPaymentAmount: profile.safeMonthlyPayment,
-          termMonths: 12,
+          id: active.id ?? '',
+          originalAmount: active.originalAmount,
+          paidAmount: active.paidAmount,
+          outstandingBalance: active.outstandingBalance,
+          progressPercentage: active.progressPct,
+          nextPaymentAmount: active.monthlyPayment,
+          termMonths: active.months || 12,
           status: 'active',
         }
-      : null,
+      : profile.usedAmount > 0
+        ? {
+            id: '',
+            originalAmount: profile.usedAmount,
+            paidAmount: 0,
+            outstandingBalance: profile.usedAmount,
+            progressPercentage: 0,
+            nextPaymentAmount: profile.safeMonthlyPayment,
+            termMonths: 12,
+            status: 'active',
+          }
+        : null,
   };
 }
 
@@ -423,44 +481,50 @@ export async function getTransactions(): Promise<Transaction[]> {
   return home.transactions;
 }
 
-function localSimulateLoan({ amount, months }: SimulatorInput): SimulatorResult {
-  const rate = 0.02;
-  const factor = Math.pow(1 + rate, months);
-  const monthlyPayment = Math.round((amount * (rate * factor)) / (factor - 1));
-  const totalPayable = monthlyPayment * months;
-  const capacityRatio = monthlyPayment / ((3200000 - 2100000) || 1100000);
-  const paymentCapacityPct = Math.min(100, Math.round(capacityRatio * 100));
+type SimulateLoanResponse = {
+  estimatedMonthlyPayment: number;
+  paymentCapacity: number;
+  riskLevel: 'low' | 'medium' | 'high';
+  recommendation: string;
+};
 
-  let capacityLabel: SimulatorResult['capacityLabel'] = 'Adecuada';
-  let aiRecommendation: SimulatorResult['aiRecommendation'] = 'Aprobado';
-  let aiNote = 'Muy buena probabilidad';
+export async function simulateLoan(input: SimulatorInput): Promise<SimulatorResult> {
+  const data = await invokeFunction<SimulateLoanResponse>('simulate-loan', {
+    requestedAmount: input.amount,
+    termMonths: input.months,
+    purpose: input.reason,
+  });
 
-  if (capacityRatio > 0.45 && capacityRatio <= 0.7) {
+  const capacityPct = data.paymentCapacity > 0
+    ? Math.min(100, Math.round((data.estimatedMonthlyPayment / data.paymentCapacity) * 100))
+    : 100;
+
+  let capacityLabel: SimulatorResult['capacityLabel'];
+  let aiRecommendation: SimulatorResult['aiRecommendation'];
+
+  if (data.riskLevel === 'low') {
+    capacityLabel = 'Adecuada';
+    aiRecommendation = 'Aprobado';
+  } else if (data.riskLevel === 'medium') {
     capacityLabel = 'Ajustada';
     aiRecommendation = 'Revisar';
-    aiNote = 'Probabilidad media — ajusta el monto';
-  } else if (capacityRatio > 0.7) {
+  } else {
     capacityLabel = 'Riesgosa';
     aiRecommendation = 'No recomendado';
-    aiNote = 'Cuota muy alta para tu flujo';
   }
 
   const passportImpactPoints =
     aiRecommendation === 'Aprobado' ? 25 : aiRecommendation === 'Revisar' ? 15 : 5;
 
   return {
-    monthlyPayment,
-    totalPayable,
-    paymentCapacityPct,
+    monthlyPayment: data.estimatedMonthlyPayment,
+    totalPayable: data.estimatedMonthlyPayment * input.months,
+    paymentCapacityPct: capacityPct,
     capacityLabel,
     aiRecommendation,
-    aiNote,
+    aiNote: data.recommendation,
     passportImpactPoints,
   };
-}
-
-export async function simulateLoan(input: SimulatorInput): Promise<SimulatorResult> {
-  return localSimulateLoan(input);
 }
 
 export type NfcTransferPayload = {
@@ -473,15 +537,54 @@ export type NfcTransferPayload = {
   note?: string;
 };
 
+export async function createPaymentRequest(input: {
+  amount: number;
+  currency?: string;
+  note?: string;
+}): Promise<CreatePaymentRequestResponse> {
+  const result = await invokeFunction<CreatePaymentRequestResponse>('create-payment-request', {
+    amount: input.amount,
+    currency: input.currency || 'COP',
+    note: input.note,
+  });
+  return result;
+}
+
+export async function getPaymentRequest(input: {
+  token: string;
+}): Promise<PaymentRequestDetails> {
+  const result = await invokeFunction<{ paymentRequest: PaymentRequestDetails }>('get-payment-request', {
+    token: input.token,
+  });
+  return result.paymentRequest;
+}
+
+export async function confirmPaymentRequest(input: {
+  token: string;
+  confirmedByUser: boolean;
+  confirmationMethod?: 'button' | 'pin' | 'biometric';
+}): Promise<ConfirmPaymentRequestResponse> {
+  const result = await invokeFunction<ConfirmPaymentRequestResponse>('confirm-payment-request', {
+    token: input.token,
+    confirmedByUser: input.confirmedByUser,
+    confirmationMethod: input.confirmationMethod || 'button',
+  });
+  invalidateWalletHomeCache();
+  return result;
+}
+
 export async function confirmNfcTransfer(
   payload: NfcTransferPayload
 ): Promise<TransferNfcResponse> {
+  const fromUserId = getSessionUserId();
   const data = await invokeFunction<TransferNfcResponse>('confirm-nfc-transfer', {
     receiverUserId: payload.receiverUserId,
+    receiverName: payload.receiverName,
     amount: payload.amount,
     reference: payload.reference,
     note: payload.note,
     createdAt: payload.createdAt,
+    ...(fromUserId ? { fromUserId } : {}),
   });
   invalidateWalletHomeCache();
   return data;

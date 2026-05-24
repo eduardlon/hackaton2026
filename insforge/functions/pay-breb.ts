@@ -1,6 +1,6 @@
-Function: Repay Credit (repay-credit)
+Function: Pay Bre-B (pay-breb)
 Status:   active
-Desc:     Applies an isolated credit repayment for the authenticated FinGrow user.
+Desc:     Demo Bre-B payment isolated to the authenticated payer wallet.
 ---
 module.exports = async function(request) {
   const corsHeaders = {
@@ -22,9 +22,11 @@ module.exports = async function(request) {
       return json({ error: { code: 'UNAUTHORIZED', message: 'No se pudo identificar la sesión del usuario.' } }, 401, corsHeaders);
     }
     const amount = Math.round(Number(body.amount || 0));
+    const recipient = String(body.recipient || body.alias || 'Comercio Bre-B').trim();
+    const note = String(body.note || 'Pago Bre-B').trim();
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return json({ error: { code: 'INVALID_AMOUNT', message: 'El abono debe ser mayor a cero.' } }, 400, corsHeaders);
+    if (!Number.isFinite(amount) || amount < 1000) {
+      return json({ error: { code: 'INVALID_AMOUNT', message: 'El pago mínimo por Bre-B es $1.000.' } }, 400, corsHeaders);
     }
 
     const client = createClient({
@@ -43,41 +45,30 @@ module.exports = async function(request) {
     }
 
     if (Number(wallet.balance) < amount) {
-      return json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'No tienes saldo suficiente para hacer este abono.' } }, 400, corsHeaders);
+      return json({ error: { code: 'INSUFFICIENT_FUNDS', message: 'No tienes saldo suficiente para este pago.' } }, 400, corsHeaders);
     }
 
-    const { data: credit, error: creditError } = await client.database
-      .from('credit_accounts')
-      .select('id, original_amount, paid_amount, outstanding_balance, monthly_payment, term_months, risk_level, eligibility, level_label, status')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .order('disbursed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (creditError || !credit) {
-      return json({ error: { code: 'ACTIVE_CREDIT_NOT_FOUND', message: 'No tienes un crédito activo para abonar.' } }, 404, corsHeaders);
-    }
-
-    const outstandingBefore = Number(credit.outstanding_balance || 0);
-    const appliedAmount = Math.min(amount, outstandingBefore);
-    const paidAmount = Number(credit.paid_amount || 0) + appliedAmount;
-    const outstandingBalance = Math.max(0, outstandingBefore - appliedAmount);
-    const status = outstandingBalance === 0 ? 'paid' : 'active';
-    const currentBalance = Number(wallet.balance) - appliedAmount;
-    const monthlyExpenses = Number(wallet.monthly_expenses || 0) + appliedAmount;
     const now = new Date().toISOString();
     const transactionId = `tx-${crypto.randomUUID()}`;
+    const currentBalance = Number(wallet.balance) - amount;
+    const monthlyExpenses = Number(wallet.monthly_expenses || 0) + amount;
+    const reference = `BREB-${Date.now()}`;
 
     await client.database
-      .from('credit_accounts')
-      .update({
-        paid_amount: paidAmount,
-        outstanding_balance: outstandingBalance,
-        status,
-        updated_at: now
-      })
-      .eq('id', credit.id);
+      .from('transactions')
+      .insert({
+        id: transactionId,
+        user_id: userId,
+        wallet_id: wallet.id,
+        type: 'transfer_out',
+        amount,
+        currency: wallet.currency || 'COP',
+        category: 'Bre-B',
+        description: `Pago Bre-B a ${recipient}`,
+        status: 'completed',
+        idempotency_key: `breb:${userId}:${Date.now()}:${amount}`,
+        metadata: { recipient, note, reference, rails: 'bre-b-demo' }
+      });
 
     await client.database
       .from('wallet_accounts')
@@ -88,53 +79,23 @@ module.exports = async function(request) {
       })
       .eq('id', wallet.id);
 
-    await client.database
-      .from('transactions')
-      .insert({
-        id: transactionId,
-        user_id: userId,
-        wallet_id: wallet.id,
-        type: 'loan_payment',
-        amount: appliedAmount,
-        currency: wallet.currency || 'COP',
-        category: 'Crédito',
-        description: status === 'paid' ? 'Abono final de crédito' : 'Abono a crédito',
-        status: 'completed',
-        idempotency_key: `loan_payment:${userId}:${Date.now()}:${appliedAmount}`,
-        metadata: { creditId: credit.id, outstandingBefore, outstandingBalance }
-      });
-
-    const originalAmount = Number(credit.original_amount || 0);
-    const progressPercentage = originalAmount > 0
-      ? Math.min(100, Math.round((paidAmount / originalAmount) * 100))
-      : 0;
-
     return json({
       payment: {
         id: transactionId,
-        amount: appliedAmount,
-        paidAt: now,
-        status: 'completed'
+        reference,
+        recipient,
+        amount,
+        status: 'completed',
+        paidAt: now
       },
       wallet: {
         previousBalance: wallet.balance,
         currentBalance,
         currency: wallet.currency || 'COP'
-      },
-      activeLoan: {
-        id: credit.id,
-        originalAmount,
-        paidAmount,
-        outstandingBalance,
-        progressPercentage,
-        nextPaymentAmount: Math.min(Number(credit.monthly_payment || 0), outstandingBalance),
-        termMonths: Number(credit.term_months || 0),
-        status,
-        updatedAt: now
       }
     }, 200, corsHeaders);
   } catch (error) {
-    return json({ error: { code: 'INTERNAL_ERROR', message: error?.message || 'Error inesperado abonando crédito.' } }, 500, corsHeaders);
+    return json({ error: { code: 'INTERNAL_ERROR', message: error?.message || 'Error inesperado pagando por Bre-B.' } }, 500, corsHeaders);
   }
 };
 
