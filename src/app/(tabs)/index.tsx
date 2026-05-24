@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, View } from 'react-native';
 
 import { Header, ScreenContainer } from '@/components';
@@ -41,6 +41,12 @@ export default function HomeScreen() {
   useEffect(() => {
     loadHome();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadHome();
+    }, [])
+  );
 
   const runAction = async (label: string, task: () => Promise<void>) => {
     if (actionLoading) return;

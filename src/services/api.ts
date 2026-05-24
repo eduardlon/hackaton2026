@@ -362,6 +362,9 @@ let walletHomeCache: ReturnType<typeof mapWalletHome> | null = null;
 let walletHomeCachedAt = 0;
 const CACHE_TTL_MS = 15_000;
 
+let localWalletCreditTopUp = 0;
+let localCreditUsed = 0;
+
 function currentUserId(): string | null {
   // El backend identifica el contexto con el access_token. No usamos un ID
   // hardcodeado: si no hay token, no llamamos a las functions.
@@ -418,7 +421,11 @@ export async function getUser(): Promise<User> {
 
 export async function getWallet(): Promise<Wallet> {
   const home = await getWalletHome();
-  return home.wallet;
+  if (!localWalletCreditTopUp) return home.wallet;
+  return {
+    ...home.wallet,
+    balance: home.wallet.balance + localWalletCreditTopUp,
+  };
 }
 
 export async function getPassport(): Promise<Passport> {
@@ -437,7 +444,25 @@ export async function getPassport(): Promise<Passport> {
 
 export async function getCredit(): Promise<Credit> {
   await delay();
-  return mockCredit;
+  const remaining = Math.max(0, mockCredit.estimatedAmount - localCreditUsed);
+  return {
+    ...mockCredit,
+    estimatedAmount: remaining,
+    potentialAmount: Math.max(remaining, mockCredit.potentialAmount - localCreditUsed),
+  };
+}
+
+export function obtainCreditAmount(amount: number) {
+  const available = Math.max(0, mockCredit.estimatedAmount - localCreditUsed);
+  const approvedAmount = Math.max(0, Math.min(amount, available));
+  localCreditUsed += approvedAmount;
+  localWalletCreditTopUp += approvedAmount;
+  invalidateWalletHomeCache();
+  return {
+    approvedAmount,
+    remainingCredit: Math.max(0, mockCredit.estimatedAmount - localCreditUsed),
+    walletTopUp: localWalletCreditTopUp,
+  };
 }
 
 export async function getTransactions(): Promise<Transaction[]> {

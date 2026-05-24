@@ -5,7 +5,6 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
-  FileText,
   Landmark,
   Lightbulb,
   Minus,
@@ -16,7 +15,7 @@ import {
   Wallet as WalletIcon,
 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { Alert, View } from 'react-native';
 
 import {
   Badge,
@@ -30,10 +29,9 @@ import {
   Text,
 } from '@/components';
 import { Selector } from '@/components/Selector';
-import { mockCredit } from '@/data/mock';
-import { simulateLoan } from '@/services/api';
+import { getCredit, getWallet, obtainCreditAmount, simulateLoan } from '@/services/api';
 import { useTheme } from '@/theme';
-import type { SimulatorResult } from '@/types';
+import type { Credit, SimulatorResult, Wallet } from '@/types';
 import { formatMoney, formatPercent } from '@/utils/format';
 
 const MONTH_OPTIONS = [
@@ -56,38 +54,97 @@ const REASON_OPTIONS = [
 
 const STEP = 100000;
 const MIN_AMOUNT = 100000;
-const MAX_AMOUNT = 2000000;
 
 export default function CreditoScreen() {
   const { theme } = useTheme();
-  const credit = mockCredit;
 
-  const [amount, setAmount] = useState(600000);
+  const [credit, setCredit] = useState<Credit | null>(null);
+  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [amount, setAmount] = useState(100000);
   const [months, setMonths] = useState(6);
   const [reason, setReason] = useState('Inventario');
   const [resultKey, setResultKey] = useState(0);
   const [result, setResult] = useState<SimulatorResult | null>(null);
   const [loadingSim, setLoadingSim] = useState(false);
+  const [disbursedAmount, setDisbursedAmount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoadingSim(true);
-    simulateLoan({ amount, months, reason })
-      .then((r) => {
-        if (cancelled) return;
-        setResult(r);
-        setResultKey((k) => k + 1);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingSim(false);
-      });
+    (async () => {
+      const [c, w] = await Promise.all([getCredit(), getWallet()]);
+      if (cancelled) return;
+      setCredit(c);
+      setWallet(w);
+      setAmount((current) => Math.min(Math.max(MIN_AMOUNT, current), Math.max(MIN_AMOUNT, c.estimatedAmount)));
+    })();
     return () => {
       cancelled = true;
     };
-  }, [amount, months, reason]);
+  }, []);
 
-  const inc = () => setAmount((a) => Math.min(MAX_AMOUNT, a + STEP));
-  const dec = () => setAmount((a) => Math.max(MIN_AMOUNT, a - STEP));
+  const available = credit?.estimatedAmount ?? 0;
+  const canRequest = available > 0;
+  const requestAmount = Math.min(amount, available);
+  const remainingAfterSimulation = Math.max(0, available - requestAmount);
+
+  const clearSimulation = () => {
+    setResult(null);
+    setDisbursedAmount(0);
+  };
+
+  const inc = () => {
+    clearSimulation();
+    setAmount((a) => Math.min(available, a + STEP));
+  };
+
+  const dec = () => {
+    clearSimulation();
+    setAmount((a) => Math.max(MIN_AMOUNT, a - STEP));
+  };
+
+  const useFullAvailable = () => {
+    clearSimulation();
+    setAmount(Math.max(MIN_AMOUNT, available));
+  };
+
+  const handleMonthsChange = (value: number) => {
+    clearSimulation();
+    setMonths(value);
+  };
+
+  const handleReasonChange = (value: string) => {
+    clearSimulation();
+    setReason(value);
+  };
+
+  const handleSimulate = async () => {
+    if (!canRequest) return;
+    setLoadingSim(true);
+    try {
+      const simulation = await simulateLoan({ amount: requestAmount, months, reason });
+      setResult(simulation);
+      setResultKey((k) => k + 1);
+      setDisbursedAmount(0);
+    } finally {
+      setLoadingSim(false);
+    }
+  };
+
+  const handleObtainCredit = async () => {
+    if (!result || !canRequest) return;
+    const outcome = obtainCreditAmount(requestAmount);
+    const [nextCredit, nextWallet] = await Promise.all([getCredit(), getWallet()]);
+    setCredit(nextCredit);
+    setWallet(nextWallet);
+    setDisbursedAmount(outcome.approvedAmount);
+    setAmount(Math.max(MIN_AMOUNT, outcome.remainingCredit));
+    setResult(null);
+    setResultKey((k) => k + 1);
+    Alert.alert(
+      'Crédito desembolsado',
+      `${formatMoney(outcome.approvedAmount)} fueron enviados a tu billetera. Te queda disponible ${formatMoney(outcome.remainingCredit)}.`
+    );
+  };
 
   const fallback: SimulatorResult = {
     monthlyPayment: 0,
@@ -95,19 +152,19 @@ export default function CreditoScreen() {
     paymentCapacityPct: 0,
     capacityLabel: 'Adecuada',
     aiRecommendation: 'Aprobado',
-    aiNote: 'Calculando…',
+    aiNote: 'Simula para ver tu recomendación',
     passportImpactPoints: 0,
   };
   const view = result ?? fallback;
 
-  const capacityTone =
+  const capacityTone: 'success' | 'warn' | 'danger' =
     view.capacityLabel === 'Adecuada'
       ? 'success'
       : view.capacityLabel === 'Ajustada'
         ? 'warn'
         : 'danger';
 
-  const aiTone =
+  const aiTone: 'success' | 'warn' | 'danger' =
     view.aiRecommendation === 'Aprobado'
       ? 'success'
       : view.aiRecommendation === 'Revisar'
@@ -118,285 +175,233 @@ export default function CreditoScreen() {
     <ScreenContainer hasTabBar>
       <Header
         title="Crédito"
-        subtitle="Financiamiento responsable para tu negocio"
+        subtitle="Simula, decide y desembolsa de forma responsable"
         notifications={4}
       />
 
-      {/* Crédito estimado */}
-      <Card delay={0} padded style={{ padding: 20, gap: 14, marginBottom: 14 }}>
+      <Card delay={0} padded style={{ padding: 20, gap: 16, marginBottom: 14 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text variant="bodyStrong">Crédito estimado disponible</Text>
+          <View>
+            <Text variant="bodyStrong">Cupo disponible</Text>
+            <Text variant="micro" tone="muted">
+              Puedes usarlo completo o solo una parte.
+            </Text>
+          </View>
           <View
             style={{
-              width: 38,
-              height: 38,
-              borderRadius: 19,
+              width: 42,
+              height: 42,
+              borderRadius: 21,
               backgroundColor: theme.colors.primarySoft,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Landmark size={20} color={theme.colors.primaryDark} />
+            <Landmark size={21} color={theme.colors.primaryDark} />
           </View>
         </View>
+
         <Text variant="display" tone="primary" numberOfLines={1} adjustsFontSizeToFit>
-          {formatMoney(credit.estimatedAmount)}
+          {formatMoney(available)}
         </Text>
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View
-            style={{
-              flex: 1,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              padding: 10,
-              borderRadius: theme.radii.lg,
-              backgroundColor: theme.colors.surfaceAlt,
-            }}
-          >
-            <ShieldCheck size={18} color={theme.colors.primaryDark} />
-            <View>
-              <Text variant="micro" tone="muted">
-                Riesgo actual
-              </Text>
-              <Text variant="caption">{credit.risk}</Text>
-            </View>
+          <View style={{ flex: 1, padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 4 }}>
+            <WalletIcon size={18} color={theme.colors.primaryDark} />
+            <Text variant="micro" tone="muted">Billetera actual</Text>
+            <Text variant="bodyStrong" numberOfLines={1} adjustsFontSizeToFit>
+              {formatMoney(wallet?.balance ?? 0)}
+            </Text>
           </View>
-          <View
-            style={{
-              flex: 1,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              padding: 10,
-              borderRadius: theme.radii.lg,
-              backgroundColor: theme.colors.surfaceAlt,
-            }}
-          >
+          <View style={{ flex: 1, padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 4 }}>
             <ShieldCheck size={18} color={theme.colors.primaryDark} />
-            <View>
-              <Text variant="micro" tone="muted">
-                Nivel actual
-              </Text>
-              <Text variant="caption">{credit.level}</Text>
-            </View>
+            <Text variant="micro" tone="muted">Elegibilidad</Text>
+            <Text variant="bodyStrong">{credit?.eligibility ?? 0}%</Text>
           </View>
         </View>
 
-        <View style={{ gap: 8 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text variant="caption" tone="muted">
-              Tu elegibilidad
-            </Text>
-            <Text variant="caption" tone="primary">
-              {credit.eligibility}%
-            </Text>
-          </View>
-          <ProgressBar value={credit.eligibility} duration={900} delay={200} />
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              padding: 10,
-              borderRadius: theme.radii.lg,
-              backgroundColor: theme.colors.primarySoft,
-            }}
-          >
-            <TrendingUp size={14} color={theme.colors.primaryDark} />
-            <Text variant="micro" style={{ color: theme.colors.primaryDark, flexShrink: 1 }}>
-              Podrías subir hasta {formatMoney(credit.potentialAmount)} mejorando tu Pasaporte Financiero.
+        <ProgressBar value={credit?.eligibility ?? 0} duration={900} delay={120} />
+
+        {disbursedAmount > 0 ? (
+          <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.primarySoft }}>
+            <Text variant="bodySmall" tone="primary">
+              Último desembolso: {formatMoney(disbursedAmount)}. Tu billetera ya fue actualizada.
             </Text>
           </View>
-        </View>
+        ) : null}
       </Card>
 
-      {/* Simulador */}
       <Card delay={120} padded style={{ padding: 18, gap: 14, marginBottom: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <IconCircle Icon={Calculator} tone="primary" size={36} />
-          <Text variant="h3">Simulador de préstamo</Text>
-        </View>
-
-        {/* Monto */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingVertical: 6,
-          }}
-        >
           <View style={{ flex: 1 }}>
+            <Text variant="h3">Configura tu crédito</Text>
             <Text variant="micro" tone="muted">
-              Monto que necesitas
+              La simulación solo cambia cuando presionas Simular.
             </Text>
-            <Text variant="bodyStrong">{formatMoney(amount)}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <PressableScale
-              onPress={dec}
-              scaleTo={0.9}
-              haptic="light"
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: theme.colors.surfaceAlt,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-              }}
-            >
-              <Minus size={16} color={theme.colors.text} />
-            </PressableScale>
-            <PressableScale
-              onPress={inc}
-              scaleTo={0.9}
-              haptic="light"
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: theme.colors.primary,
-              }}
-            >
-              <Plus size={16} color="#0E0F0E" />
-            </PressableScale>
           </View>
         </View>
-        <View style={{ height: 1, backgroundColor: theme.colors.borderSoft }} />
 
-        <Selector
-          label="Plazo"
-          value={months}
-          options={MONTH_OPTIONS}
-          onChange={setMonths}
-        />
-        <View style={{ height: 1, backgroundColor: theme.colors.borderSoft }} />
+        <View style={{ gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1 }}>
+              <Text variant="micro" tone="muted">Monto a solicitar</Text>
+              <Text variant="h2" tone="primary" numberOfLines={1} adjustsFontSizeToFit>
+                {formatMoney(requestAmount)}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <PressableScale
+                onPress={dec}
+                disabled={!canRequest || amount <= MIN_AMOUNT}
+                scaleTo={0.9}
+                haptic="light"
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.surfaceAlt,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  opacity: !canRequest || amount <= MIN_AMOUNT ? 0.4 : 1,
+                }}
+              >
+                <Minus size={16} color={theme.colors.text} />
+              </PressableScale>
+              <PressableScale
+                onPress={inc}
+                disabled={!canRequest || amount >= available}
+                scaleTo={0.9}
+                haptic="light"
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.primary,
+                  opacity: !canRequest || amount >= available ? 0.4 : 1,
+                }}
+              >
+                <Plus size={16} color="#0E0F0E" />
+              </PressableScale>
+            </View>
+          </View>
 
-        <Selector
-          label="Motivo del préstamo"
-          value={reason}
-          options={REASON_OPTIONS}
-          onChange={setReason}
-        />
-      </Card>
-
-      {/* Resultados */}
-      <MotiView
-        key={resultKey}
-        from={{ opacity: 0, translateY: 10 }}
-        animate={{ opacity: 1, translateY: 0 }}
-        transition={{ type: 'timing', duration: 260 }}
-      >
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
-          <Card animated={false} padded style={{ flexBasis: '47%', flexGrow: 1, gap: 6 }}>
-            <IconCircle Icon={CircleDollarSign} tone="primary" size={32} />
-            <Text variant="micro" tone="muted">
-              Cuota estimada
-            </Text>
-            <Text variant="h3" tone="primary" numberOfLines={1} adjustsFontSizeToFit>
-              {formatMoney(view.monthlyPayment)}
-            </Text>
-            <Text variant="micro" tone="muted">
-              /mes — Total: {formatMoney(view.totalPayable)}
-            </Text>
-          </Card>
-
-          <Card animated={false} padded style={{ flexBasis: '47%', flexGrow: 1, gap: 6 }}>
-            <IconCircle Icon={WalletIcon} tone={capacityTone} size={32} />
-            <Text variant="micro" tone="muted">
-              Capacidad de pago
-            </Text>
-            <Text variant="h3" numberOfLines={1}>
-              {formatPercent(view.paymentCapacityPct)}
-            </Text>
-            <Badge label={view.capacityLabel} tone={capacityTone} />
-          </Card>
-
-          <Card animated={false} padded style={{ flexBasis: '47%', flexGrow: 1, gap: 6 }}>
-            <IconCircle Icon={Sparkles} tone={aiTone} size={32} />
-            <Text variant="micro" tone="muted">
-              Recomendación IA
-            </Text>
-            <Text variant="h3" numberOfLines={1}>
-              {view.aiRecommendation}
-            </Text>
-            <Text variant="micro" tone="muted" numberOfLines={2}>
-              {view.aiNote}
-            </Text>
-          </Card>
-
-          <Card animated={false} padded style={{ flexBasis: '47%', flexGrow: 1, gap: 6 }}>
-            <IconCircle Icon={ShieldCheck} tone="primary" size={32} />
-            <Text variant="micro" tone="muted">
-              Impacto en tu Pasaporte
-            </Text>
-            <Text variant="h3" tone="primary">
-              +{view.passportImpactPoints} puntos
-            </Text>
-            <Text variant="micro" tone="muted">
-              si pagas a tiempo
-            </Text>
-          </Card>
+          <PressableScale
+            onPress={useFullAvailable}
+            disabled={!canRequest}
+            haptic="selection"
+            scaleTo={0.98}
+            style={{
+              alignSelf: 'flex-start',
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: theme.radii.lg,
+              backgroundColor: theme.colors.primarySoft,
+              opacity: canRequest ? 1 : 0.5,
+            }}
+          >
+            <Text variant="caption" tone="primary">Usar todo mi cupo</Text>
+          </PressableScale>
         </View>
-      </MotiView>
 
-      <View style={{ gap: 10, marginBottom: 14 }}>
+        <View style={{ height: 1, backgroundColor: theme.colors.borderSoft }} />
+
+        <Selector label="Plazo" value={months} options={MONTH_OPTIONS} onChange={handleMonthsChange} />
+        <View style={{ height: 1, backgroundColor: theme.colors.borderSoft }} />
+        <Selector label="Motivo del préstamo" value={reason} options={REASON_OPTIONS} onChange={handleReasonChange} />
+
+        <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 4 }}>
+          <Text variant="micro" tone="muted">Disponible después si tomas este monto</Text>
+          <Text variant="bodyStrong">{formatMoney(remainingAfterSimulation)}</Text>
+        </View>
+
         <PrimaryButton
           label={loadingSim ? 'Simulando…' : 'Simular crédito'}
           trailingArrow
           loading={loadingSim}
-          onPress={() => setResultKey((k) => k + 1)}
+          disabled={!canRequest || loadingSim}
+          onPress={handleSimulate}
         />
-        <PrimaryButton
-          label="Solicitar evaluación"
-          variant="secondary"
-          icon={FileText}
-          trailingArrow
-        />
-      </View>
+      </Card>
 
-      {/* Cómo aumentar tu cupo */}
+      {result ? (
+        <MotiView
+          key={resultKey}
+          from={{ opacity: 0, translateY: 10 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={{ type: 'timing', duration: 260 }}
+        >
+          <Card animated={false} padded style={{ padding: 18, gap: 14, marginBottom: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <IconCircle Icon={Sparkles} tone={aiTone} size={36} />
+              <View style={{ flex: 1 }}>
+                <Text variant="h3">Resultado de simulación</Text>
+                <Text variant="micro" tone="muted">
+                  Revisa antes de obtener el crédito.
+                </Text>
+              </View>
+              <Badge label={view.aiRecommendation} tone={aiTone} />
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+              {[
+                { label: 'Cuota estimada', value: formatMoney(view.monthlyPayment), Icon: CircleDollarSign, tone: 'primary' as const },
+                { label: 'Capacidad usada', value: formatPercent(view.paymentCapacityPct), Icon: WalletIcon, tone: capacityTone },
+                { label: 'Total a pagar', value: formatMoney(view.totalPayable), Icon: Banknote, tone: 'neutral' as const },
+                { label: 'Puntos posibles', value: `+${view.passportImpactPoints}`, Icon: ShieldCheck, tone: 'primary' as const },
+              ].map((item) => (
+                <View key={item.label} style={{ flexBasis: '47%', flexGrow: 1, padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 6 }}>
+                  <IconCircle Icon={item.Icon} tone={item.tone} size={30} />
+                  <Text variant="micro" tone="muted">{item.label}</Text>
+                  <Text variant="bodyStrong" numberOfLines={1} adjustsFontSizeToFit>{item.value}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.primarySoft }}>
+              <Text variant="bodySmall" tone="primary">{view.aiNote}</Text>
+            </View>
+
+            <PrimaryButton label="Obtener crédito" trailingArrow onPress={handleObtainCredit} />
+          </Card>
+        </MotiView>
+      ) : (
+        <Card delay={220} padded style={{ padding: 16, gap: 10, marginBottom: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <IconCircle Icon={Lightbulb} tone="warn" size={36} />
+            <View style={{ flex: 1 }}>
+              <Text variant="h3">Primero simula</Text>
+              <Text variant="bodySmall" tone="muted">
+                Cambia monto, plazo o motivo y presiona Simular crédito para ver cuota, riesgo y cupo restante.
+              </Text>
+            </View>
+          </View>
+        </Card>
+      )}
+
       <Card delay={300} padded style={{ padding: 16, gap: 12 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <IconCircle Icon={Lightbulb} tone="warn" size={36} />
-          <Text variant="h3">Cómo aumentar tu cupo</Text>
+          <IconCircle Icon={TrendingUp} tone="primary" size={36} />
+          <Text variant="h3">Cómo cuidar tu cupo</Text>
         </View>
         {[
-          'Paga tus cuotas a tiempo para subir tu puntaje.',
-          'Conecta tu cuenta bancaria y aumenta tu historial.',
-          'Mantén tu información actualizada en tu perfil.',
+          'Usa solo el monto que realmente necesitas.',
+          'El cupo restante queda disponible para futuras solicitudes.',
+          'Paga a tiempo para mejorar tu Pasaporte Financiero.',
         ].map((tip) => (
           <View key={tip} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-            <View
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 11,
-                backgroundColor: theme.colors.primarySoft,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginTop: 1,
-              }}
-            >
+            <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: theme.colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
               <Check size={12} color={theme.colors.primaryDark} strokeWidth={3} />
             </View>
-            <Text variant="bodySmall" style={{ flex: 1 }}>
-              {tip}
-            </Text>
+            <Text variant="bodySmall" style={{ flex: 1 }}>{tip}</Text>
             <ChevronRight size={14} color={theme.colors.textSoft} />
           </View>
         ))}
       </Card>
-      <View style={{ display: 'none' }}>
-        <Banknote />
-      </View>
     </ScreenContainer>
   );
 }

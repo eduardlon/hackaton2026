@@ -5,17 +5,20 @@ import {
   CreditCard,
   LogOut,
   Moon,
+  PiggyBank,
   Send,
   ShieldCheck,
   Star,
   Sun,
+  TrendingUp,
   User as UserIcon,
+  Wallet,
   X,
 } from 'lucide-react-native';
 import { type ReactNode, useState } from 'react';
 import { Alert, Modal, View } from 'react-native';
 
-import { mockCredit, mockUser } from '@/data/mock';
+import { mockCredit, mockOverview, mockPassport, mockUser, mockWallet } from '@/data/mock';
 import { canUseNativeNotifications, sendLocalNotification } from '@/services/notifications';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
@@ -197,9 +200,86 @@ function NotificationsModal({ visible, onClose }: { visible: boolean; onClose: (
   );
 }
 
+function FinancialProfileModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { theme } = useTheme();
+  const passportPct = Math.round((mockPassport.points / mockPassport.nextLevel) * 100);
+
+  const metrics = [
+    { label: 'Saldo billetera', value: formatMoney(mockWallet.balance), Icon: Wallet, tone: 'primary' as const },
+    { label: 'Ingresos mes', value: formatMoney(mockWallet.monthlyIncome), Icon: TrendingUp, tone: 'success' as const },
+    { label: 'Gastos mes', value: formatMoney(mockWallet.monthlyExpenses), Icon: CreditCard, tone: 'danger' as const },
+    { label: 'Margen libre', value: formatMoney(mockWallet.freeMargin), Icon: PiggyBank, tone: 'primary' as const },
+  ];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <SheetFrame>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View>
+            <Text variant="h3">Perfil financiero</Text>
+            <Text variant="micro" tone="muted">Resumen de salud, cupo y Pasaporte</Text>
+          </View>
+          <CloseButton onPress={onClose} />
+        </View>
+
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          {metrics.map(({ label, value, Icon, tone }) => (
+            <View
+              key={label}
+              style={{
+                flexBasis: '47%',
+                flexGrow: 1,
+                padding: 12,
+                borderRadius: theme.radii.lg,
+                backgroundColor: theme.colors.surfaceAlt,
+                gap: 5,
+              }}
+            >
+              <Icon size={17} color={tone === 'danger' ? theme.colors.danger : tone === 'success' ? theme.colors.success : theme.colors.primaryDark} />
+              <Text variant="micro" tone="muted">{label}</Text>
+              <Text variant="bodyStrong" numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={{ padding: 12, borderRadius: theme.radii.xl, backgroundColor: theme.colors.primarySoft, gap: 6 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="bodyStrong" tone="primary">Pasaporte Financiero</Text>
+            <Text variant="caption" tone="primary">{passportPct}%</Text>
+          </View>
+          <Text variant="micro" tone="primary">
+            {mockPassport.points} de {mockPassport.nextLevel} puntos · Nivel {mockPassport.levelName}
+          </Text>
+          <Text variant="micro" tone="primary">Próximo beneficio: {mockPassport.nextBenefit}</Text>
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <View style={{ flex: 1, padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 4 }}>
+            <Text variant="micro" tone="muted">Crédito disponible</Text>
+            <Text variant="bodyStrong" tone="primary">{formatMoney(mockCredit.estimatedAmount)}</Text>
+            <Text variant="micro" tone="muted">Riesgo {mockCredit.risk}</Text>
+          </View>
+          <View style={{ flex: 1, padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 4 }}>
+            <Text variant="micro" tone="muted">Estado</Text>
+            <Text variant="bodyStrong" tone="success">{mockOverview.status}</Text>
+            <Text variant="micro" tone="muted">Balance +{mockOverview.netBalance.deltaPct}%</Text>
+          </View>
+        </View>
+
+        <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt }}>
+          <Text variant="bodySmall" tone="muted">
+            Recomendación: mantén tu margen libre sobre {formatMoney(900000)} y paga facturas a tiempo para mejorar tu cupo.
+          </Text>
+        </View>
+      </SheetFrame>
+    </Modal>
+  );
+}
+
 function ProfileModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const router = useRouter();
   const { theme } = useTheme();
+  const [financialVisible, setFinancialVisible] = useState(false);
   const authUser = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const user = authUser
@@ -220,12 +300,13 @@ function ProfileModal({ visible, onClose }: { visible: boolean; onClose: () => v
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <SheetFrame>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text variant="h3">Mi perfil</Text>
-          <CloseButton onPress={onClose} />
-        </View>
+    <>
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+        <SheetFrame>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="h3">Mi perfil</Text>
+            <CloseButton onPress={onClose} />
+          </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <View
@@ -277,27 +358,47 @@ function ProfileModal({ visible, onClose }: { visible: boolean; onClose: () => v
           </View>
         </View>
 
-        <PressableScale
-          onPress={handleSignOut}
-          haptic="medium"
-          scaleTo={0.98}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            paddingVertical: 14,
-            borderRadius: theme.radii.lg,
-            borderWidth: 1,
-            borderColor: theme.colors.dangerSoft,
-            backgroundColor: theme.colors.surface,
-          }}
-        >
-          <LogOut size={18} color={theme.colors.danger} />
-          <Text variant="bodyStrong" tone="danger">Cerrar sesión</Text>
-        </PressableScale>
-      </SheetFrame>
-    </Modal>
+          <PressableScale
+            onPress={() => setFinancialVisible(true)}
+            haptic="selection"
+            scaleTo={0.98}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              paddingVertical: 14,
+              borderRadius: theme.radii.lg,
+              backgroundColor: theme.colors.primary,
+            }}
+          >
+            <ShieldCheck size={18} color={theme.colors.primaryContrast} />
+            <Text variant="bodyStrong" style={{ color: theme.colors.primaryContrast }}>Ver perfil financiero</Text>
+          </PressableScale>
+
+          <PressableScale
+            onPress={handleSignOut}
+            haptic="medium"
+            scaleTo={0.98}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              paddingVertical: 14,
+              borderRadius: theme.radii.lg,
+              borderWidth: 1,
+              borderColor: theme.colors.dangerSoft,
+              backgroundColor: theme.colors.surface,
+            }}
+          >
+            <LogOut size={18} color={theme.colors.danger} />
+            <Text variant="bodyStrong" tone="danger">Cerrar sesión</Text>
+          </PressableScale>
+        </SheetFrame>
+      </Modal>
+      <FinancialProfileModal visible={financialVisible} onClose={() => setFinancialVisible(false)} />
+    </>
   );
 }
 
