@@ -60,6 +60,14 @@
           "faceIDPermission": "FinGrow protege tu PIN con biometría."
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "FinGrow accede a tus fotos para leer facturas y preparar pagos rápidos.",
+          "cameraPermission": "FinGrow usa la cámara para escanear facturas y extraer datos de pago.",
+          "microphonePermission": false
+        }
+      ],
       "react-native-nfc-manager"
     ],
     "experiments": {

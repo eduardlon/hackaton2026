@@ -18,8 +18,8 @@ type Props = {
 export function QuickActions({ delay = 0, onAction }: Props) {
   const router = useRouter();
   const actions: Action[] = [
-    { label: 'Transferir', Icon: Send, onPress: () => router.push('/nfc-transfer') },
-    { label: 'Recibir\ndinero', Icon: CircleDollarSign },
+    { label: 'Pagar\nBre-B', Icon: Send, onPress: () => router.push('/breb-payment') },
+    { label: 'Recibir\ndinero', Icon: CircleDollarSign, onPress: () => router.push('/nfc-transfer') },
     { label: 'Pagar\ncon foto', Icon: Camera },
     { label: 'Preguntar\nIA', Icon: Brain },
   ];

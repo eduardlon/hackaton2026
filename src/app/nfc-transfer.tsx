@@ -1,12 +1,10 @@
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import {
-  Antenna,
   ArrowDownLeft,
   ArrowLeft,
-  ArrowUpRight,
-  Banknote,
   CheckCircle2,
+  QrCode,
   Radio,
   WifiOff,
 } from 'lucide-react-native';
@@ -14,9 +12,7 @@ import { MotiView } from 'moti';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
-  TextInput,
   View,
 } from 'react-native';
 import Animated, {
@@ -32,16 +28,13 @@ import { PressableScale, Text } from '@/components';
 import { confirmNfcTransfer, type NfcTransferPayload } from '@/services/api';
 import {
   cancelNfc,
-  createTransferReference,
   isNfcAvailable,
   startListeningForTransfer,
   stopListeningForTransfer,
-  writeTransferPayload,
 } from '@/services/nfc';
-import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 
-type Mode = 'select' | 'send' | 'receive';
+type Mode = 'select' | 'receive' | 'qr';
 type Status = 'idle' | 'amount' | 'scanning' | 'success' | 'error';
 
 const COP = (n: number) =>
@@ -51,11 +44,9 @@ export default function NfcTransferScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const user = useAuthStore((s) => s.user);
 
   const [mode, setMode] = useState<Mode>('select');
   const [status, setStatus] = useState<Status>('idle');
-  const [amountText, setAmountText] = useState('');
   const [available, setAvailable] = useState<boolean | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [receivedPayload, setReceivedPayload] = useState<NfcTransferPayload | null>(null);
@@ -104,7 +95,7 @@ export default function NfcTransferScreen() {
     transform: [{ scale: 0.7 + ring2.value * 1.2 }],
   }));
 
-  const scanningTitle = mode === 'receive' ? 'Recepción habilitada' : 'Enviando por NFC…';
+  const scanningTitle = 'Recepción NFC habilitada';
 
   const close = () => {
     cancelRef.current = true;
@@ -112,43 +103,6 @@ export default function NfcTransferScreen() {
     cancelNfc().catch(() => {});
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
-  };
-
-  const startSend = async () => {
-    const amount = Number(amountText.replace(/\D/g, ''));
-    if (!amount || amount < 1000) {
-      Alert.alert('Monto inválido', 'El mínimo para enviar por NFC es $1.000');
-      return;
-    }
-    if (!user) {
-      Alert.alert('Sesión expirada', 'Vuelve a iniciar sesión.');
-      return;
-    }
-    setStatus('scanning');
-    setResultMessage(
-      'El receptor debe tener la recepción habilitada. Acerca tu celular cuando te confirme.'
-    );
-    try {
-      const payload: NfcTransferPayload = {
-        fromUserId: user.id,
-        fromName: user.name,
-        amount,
-        reference: await createTransferReference(),
-        createdAt: new Date().toISOString(),
-      };
-      await writeTransferPayload(payload);
-      if (cancelRef.current) return;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setStatus('success');
-      setResultMessage(
-        `Solicitud NFC enviada por ${COP(amount)}. El receptor finaliza la confirmación.`
-      );
-    } catch (err) {
-      if (cancelRef.current) return;
-      const msg = err instanceof Error ? err.message : 'Error NFC desconocido';
-      setStatus('error');
-      setResultMessage(msg);
-    }
   };
 
   const startReceive = async () => {
@@ -198,7 +152,6 @@ export default function NfcTransferScreen() {
     stopListenRef.current = null;
     setStatus('idle');
     setMode('select');
-    setAmountText('');
     setResultMessage(null);
     setReceivedPayload(null);
   };
@@ -233,7 +186,7 @@ export default function NfcTransferScreen() {
         >
           <ArrowLeft size={20} color={theme.colors.primaryDark} strokeWidth={2.2} />
         </PressableScale>
-        <Text variant="h3">Pago por NFC</Text>
+        <Text variant="h3">Recibir dinero</Text>
         <View style={{ width: 44 }} />
       </View>
 
@@ -267,8 +220,7 @@ export default function NfcTransferScreen() {
         {mode === 'select' ? (
           <View style={{ gap: 12, marginTop: 12 }}>
             <Text variant="body" tone="muted">
-              Primero el receptor permite la recepción; luego el emisor acerca su celular para
-              enviar por NFC.
+              Cobra por NFC o muestra tu QR. Quien paga usa su billetera como si acercara una tarjeta.
             </Text>
 
             <PressableScale
@@ -306,7 +258,7 @@ export default function NfcTransferScreen() {
                   Recibir por NFC
                 </Text>
                 <Text variant="bodySmall" style={{ color: '#0E0F0E', opacity: 0.7 }}>
-                  Permite el envío desde otro celular
+                  Activa tu celular como punto de cobro
                 </Text>
               </View>
               <Radio size={22} color="#0E0F0E" strokeWidth={2.2} />
@@ -314,8 +266,9 @@ export default function NfcTransferScreen() {
 
             <PressableScale
               onPress={() => {
-                setMode('send');
-                setStatus('amount');
+                setMode('qr');
+                setStatus('idle');
+                setResultMessage(null);
               }}
               haptic="medium"
               scaleTo={0.98}
@@ -341,20 +294,20 @@ export default function NfcTransferScreen() {
                   justifyContent: 'center',
                 }}
               >
-                <ArrowUpRight size={26} color={theme.colors.primaryDark} strokeWidth={2.4} />
+                <QrCode size={26} color={theme.colors.primaryDark} strokeWidth={2.4} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text variant="h3">Enviar por NFC</Text>
+                <Text variant="h3">Mostrar QR</Text>
                 <Text variant="bodySmall" tone="muted">
-                  Continúa cuando el receptor ya permitió
+                  Permite que otro escanee y te pague
                 </Text>
               </View>
-              <Antenna size={22} color={theme.colors.primaryDark} strokeWidth={2.2} />
+              <QrCode size={22} color={theme.colors.primaryDark} strokeWidth={2.2} />
             </PressableScale>
           </View>
         ) : null}
 
-        {mode === 'send' && status === 'amount' ? (
+        {mode === 'qr' ? (
           <MotiView
             from={{ opacity: 0, translateY: 12 }}
             animate={{ opacity: 1, translateY: 0 }}
@@ -362,15 +315,14 @@ export default function NfcTransferScreen() {
             style={{ marginTop: 12, gap: 18 }}
           >
             <Text variant="body" tone="muted">
-              ¿Cuánto quieres enviar por NFC?
+              Muestra este QR para que otra persona te pague desde su billetera.
             </Text>
             <View
               style={{
-                flexDirection: 'row',
                 alignItems: 'center',
-                gap: 12,
-                height: 70,
-                paddingHorizontal: 16,
+                justifyContent: 'center',
+                minHeight: 230,
+                padding: 18,
                 borderRadius: theme.radii.xl,
                 borderWidth: 1.5,
                 borderColor: theme.colors.primary,
@@ -378,46 +330,37 @@ export default function NfcTransferScreen() {
                 ...theme.shadows.sm,
               }}
             >
-              <Banknote size={22} color={theme.colors.primaryDark} />
-              <Text variant="h2">$</Text>
-              <TextInput
-                placeholder="0"
-                placeholderTextColor={theme.colors.textSoft}
-                keyboardType="number-pad"
-                value={amountText}
-                onChangeText={(v) => setAmountText(v.replace(/\D/g, '').slice(0, 9))}
+              <View
                 style={{
-                  flex: 1,
-                  color: theme.colors.text,
-                  fontSize: 32,
-                  fontFamily: 'Inter_700Bold',
+                  width: 158,
+                  height: 158,
+                  borderRadius: 18,
+                  borderWidth: 10,
+                  borderColor: theme.colors.text,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.bg,
                 }}
-              />
+              >
+                <QrCode size={96} color={theme.colors.text} strokeWidth={2.2} />
+              </View>
+              <Text variant="micro" tone="muted" align="center" style={{ marginTop: 14 }}>
+                QR demo: alias Laura Martínez · FinGrow
+              </Text>
             </View>
-            <Text variant="micro" tone="muted">
-              Mínimo $1.000. El receptor debe tocar Permitir recepción NFC antes de enviar.
-            </Text>
 
             <PressableScale
-              onPress={startSend}
-              haptic="medium"
-              scaleTo={0.97}
+              onPress={resetFlow}
+              haptic="light"
               style={{
-                marginTop: 8,
-                height: 60,
-                borderRadius: theme.radii.xl,
                 alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'row',
-                gap: 10,
-                backgroundColor: theme.colors.primary,
-                ...theme.shadows.sm,
+                paddingVertical: 12,
+                borderRadius: theme.radii.lg,
+                borderWidth: 1.5,
+                borderColor: theme.colors.border,
               }}
             >
-              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 17, color: '#0E0F0E' }}>
-                Continuar: receptor ya permitió
-              </Text>
-              <Antenna size={20} color="#0E0F0E" />
+              <Text tone="muted">Volver</Text>
             </PressableScale>
           </MotiView>
         ) : null}
@@ -430,8 +373,8 @@ export default function NfcTransferScreen() {
             style={{ marginTop: 12, gap: 18 }}
           >
             <Text variant="body" tone="muted">
-              Activa la recepción solo cuando estés listo para recibir. Después de permitirla,
-              el emisor podrá acercar su celular y continuar el pago por NFC.
+              Activa la recepción solo cuando estés listo para cobrar. Después, quien paga acerca
+              su teléfono como si fuera una tarjeta.
             </Text>
 
             <View
@@ -460,13 +403,13 @@ export default function NfcTransferScreen() {
                 <View style={{ flex: 1 }}>
                   <Text variant="h3">Permiso del receptor</Text>
                   <Text variant="bodySmall" tone="muted">
-                    Tu celular quedará escuchando el pago del emisor.
+                    Tu celular quedará listo para recibir el pago.
                   </Text>
                 </View>
               </View>
               <Text variant="micro" tone="muted">
-                No compartimos tu PIN ni token por NFC. La transferencia se confirma con tu sesión
-                al leer el pago.
+                No compartimos tu PIN ni token por NFC. Solo se lee una solicitud de pago y se
+                confirma con tu sesión.
               </Text>
             </View>
 
@@ -552,7 +495,7 @@ export default function NfcTransferScreen() {
                   ...theme.shadows.md,
                 }}
               >
-                <Antenna size={38} color="#0E0F0E" strokeWidth={2.4} />
+                <Radio size={38} color="#0E0F0E" strokeWidth={2.4} />
               </View>
             </View>
             <Text variant="h3" align="center">

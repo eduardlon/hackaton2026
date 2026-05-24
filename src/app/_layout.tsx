@@ -57,6 +57,14 @@ function RootStack() {
         name="nfc-transfer"
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
       />
+      <Stack.Screen
+        name="breb-payment"
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
+      <Stack.Screen
+        name="invoice-payment"
+        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+      />
     </Stack>
   );
 }

@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -27,12 +27,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
-import {
-  askFinancialChat,
-  confirmBillPaymentFromInvoice,
-  processInvoiceDemo,
-  recordFinancialActivity,
-} from '@/services/api';
+import { askFinancialChat } from '@/services/api';
 import { useTheme } from '@/theme';
 
 import { PressableScale } from './PressableScale';
@@ -74,14 +69,14 @@ type QuickMenuAction = {
 const QUICK_MENU_ACTIONS: QuickMenuAction[] = [
   {
     key: QUICK_ACTION.TRANSFER,
-    label: 'Transferir',
-    helper: 'Enviar por NFC',
+    label: 'Pagar Bre-B',
+    helper: 'Transferencia',
     Icon: Send,
   },
   {
     key: QUICK_ACTION.RECEIVE,
     label: 'Recibir',
-    helper: 'Entrada demo',
+    helper: 'NFC o QR',
     Icon: ArrowDownLeft,
   },
   {
@@ -367,11 +362,9 @@ function QuickActionMenu({
 }
 
 function QuickAIButton({
-  isOpen,
   onPress,
   onLongPress,
 }: {
-  isOpen: boolean;
   onPress: () => void;
   onLongPress: () => void;
 }) {
@@ -441,21 +434,6 @@ function QuickAIButton({
           <Rect x="25" y="30" width="9" height="18" rx="4" fill="url(#aiIconDepth)" />
           <Rect x="37" y="23" width="9" height="25" rx="4" fill="url(#aiIconDepth)" />
         </Svg>
-        {isOpen ? (
-          <View
-            style={{
-              position: 'absolute',
-              width: 24,
-              height: 24,
-              borderRadius: 12,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: theme.colors.bg,
-            }}
-          >
-            <X size={15} color={theme.colors.text} strokeWidth={2.6} />
-          </View>
-        ) : null}
       </ExpoLinearGradient>
     </PressableScale>
   );
@@ -547,7 +525,6 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
   const insets = useSafeAreaInsets();
   const [aiVisible, setAiVisible] = useState(false);
   const [quickMenuVisible, setQuickMenuVisible] = useState(false);
-  const [quickActionLoading, setQuickActionLoading] = useState<QuickActionKey | null>(null);
   const visibleRoutes = state.routes.filter((route) => route.name !== 'perfil');
   const quickMenuBottomOffset = Math.max(insets.bottom, 10) + 72;
 
@@ -557,65 +534,20 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
     setAiVisible(true);
   };
 
-  const runQuickTask = async (key: QuickActionKey, task: () => Promise<void>) => {
-    if (quickActionLoading) return;
-    setQuickActionLoading(key);
-    try {
-      await task();
-    } catch (error) {
-      Alert.alert(
-        'No pudimos completar la acción',
-        error instanceof Error ? error.message : 'Intenta de nuevo.'
-      );
-    } finally {
-      setQuickActionLoading(null);
-    }
-  };
-
   const handleReceiveMoney = () => {
-    runQuickTask(QUICK_ACTION.RECEIVE, async () => {
-      const result = await recordFinancialActivity({
-        type: 'income',
-        amount: 300000,
-        category: 'Transferencias',
-        description: 'Dinero recibido desde menú rápido',
-      });
-      setQuickMenuVisible(false);
-      Alert.alert('Dinero recibido', `Tu Pasaporte sumó +${result.passportUpdate.pointsAdded} puntos.`);
-    });
+    setQuickMenuVisible(false);
+    router.push('/nfc-transfer');
   };
 
   const handlePayWithPhoto = () => {
-    runQuickTask(QUICK_ACTION.PAY_PHOTO, async () => {
-      const invoice = await processInvoiceDemo();
-      const { extracted } = invoice;
-      Alert.alert(
-        'Factura detectada',
-        `${extracted.provider ?? 'Proveedor'}\nValor: $${(extracted.amount ?? 0).toLocaleString('es-CO')}\nReferencia: ${extracted.reference ?? 'requiere revisión'}`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Pagar',
-            onPress: () => {
-              runQuickTask(QUICK_ACTION.PAY_PHOTO, async () => {
-                const result = await confirmBillPaymentFromInvoice(invoice);
-                setQuickMenuVisible(false);
-                Alert.alert(
-                  'Pago exitoso',
-                  `Pagaste ${result.payment.provider} y tu Pasaporte sumó +${result.passportUpdate.pointsAdded} puntos.`
-                );
-              });
-            },
-          },
-        ]
-      );
-    });
+    setQuickMenuVisible(false);
+    router.push('/invoice-payment');
   };
 
   const handleQuickMenuSelect = (key: QuickActionKey) => {
     if (key === QUICK_ACTION.TRANSFER) {
       setQuickMenuVisible(false);
-      router.push('/nfc-transfer');
+      router.push('/breb-payment');
       return;
     }
     if (key === QUICK_ACTION.RECEIVE) {
@@ -662,7 +594,7 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
       <QuickActionMenu
         visible={quickMenuVisible}
         bottomOffset={quickMenuBottomOffset}
-        loadingKey={quickActionLoading}
+        loadingKey={null}
         onClose={() => setQuickMenuVisible(false)}
         onSelect={handleQuickMenuSelect}
       />
@@ -684,7 +616,6 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
         >
           {visibleRoutes.slice(0, 2).map(renderTab)}
           <QuickAIButton
-            isOpen={quickMenuVisible}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               setQuickMenuVisible((current) => !current);

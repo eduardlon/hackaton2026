@@ -170,6 +170,18 @@ type TransferNfcResponse = {
   to: { id: string; name: string };
 };
 
+type BrebPaymentResponse = {
+  payment: {
+    id: string;
+    reference: string;
+    recipient: string;
+    amount: number;
+    status: string;
+    paidAt: string;
+  };
+  wallet: ConfirmBillPaymentResponse['wallet'];
+};
+
 type FinancialChatResponse = {
   answer: string;
   riskLevel: string;
@@ -178,27 +190,29 @@ type FinancialChatResponse = {
   disclaimer: string;
 };
 
-type ProcessInvoiceResponse = {
+type InvoiceExtraction = {
+  provider: string | null;
+  amount: number | null;
+  currency: string;
+  dueDate: string | null;
+  reference: string | null;
+  category: string | null;
+  concept: string | null;
+  documentType: string;
+  confidence: number;
+  requiresReview: boolean;
+  warnings: string[];
+};
+
+export type ProcessInvoiceResponse = {
   documentId: string;
   status: string;
   usedFallback: boolean;
   model: string;
-  extracted: {
-    provider: string | null;
-    amount: number | null;
-    currency: string;
-    dueDate: string | null;
-    reference: string | null;
-    category: string | null;
-    concept: string | null;
-    documentType: string;
-    confidence: number;
-    requiresReview: boolean;
-    warnings: string[];
-  };
+  extracted: InvoiceExtraction;
 };
 
-type ConfirmBillPaymentResponse = {
+export type ConfirmBillPaymentResponse = {
   payment: {
     id: string;
     status: string;
@@ -229,6 +243,13 @@ type ConfirmBillPaymentResponse = {
     currentBalance: number;
     currency: string;
   };
+};
+
+export type ProcessInvoiceImageInput = {
+  imageBase64: string;
+  mimeType?: string;
+  fileName?: string | null;
+  source?: 'camera' | 'library';
 };
 
 type RecordFinancialActivityResponse = {
@@ -648,6 +669,16 @@ export async function confirmNfcTransfer(
   return data;
 }
 
+export async function payBreb(input: {
+  amount: number;
+  recipient: string;
+  note?: string;
+}): Promise<BrebPaymentResponse> {
+  const result = await invokeFunction<BrebPaymentResponse>('pay-breb', input);
+  invalidateWalletHomeCache();
+  return result;
+}
+
 export async function askFinancialChat(message: string): Promise<FinancialChatResponse> {
   return invokeFunction<FinancialChatResponse>('financial-chat', { message });
 }
@@ -661,6 +692,17 @@ export async function processInvoiceDemo(): Promise<ProcessInvoiceResponse> {
     dueDate: '2026-05-28',
     reference: `AFINIA-DEMO-${Date.now()}`,
     category: 'Servicios públicos',
+  });
+}
+
+export async function processInvoiceImage(
+  input: ProcessInvoiceImageInput
+): Promise<ProcessInvoiceResponse> {
+  return invokeFunction<ProcessInvoiceResponse>('process-invoice', {
+    imageBase64: input.imageBase64,
+    mimeType: input.mimeType || 'image/jpeg',
+    fileName: input.fileName || undefined,
+    source: input.source,
   });
 }
 
