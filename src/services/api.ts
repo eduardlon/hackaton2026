@@ -121,8 +121,6 @@ type SimulateLoanResponse = {
   suggestedActions: string[];
 };
 
-type CreditStatusResponse = Credit;
-
 type RepayCreditResponse = {
   payment: {
     id: string;
@@ -132,6 +130,36 @@ type RepayCreditResponse = {
   };
   wallet: ConfirmBillPaymentResponse['wallet'];
   activeLoan: NonNullable<Credit['activeLoan']>;
+};
+
+type CreditProfileResponse = {
+  availableAmount: number;
+  maxAmount: number;
+  usedAmount: number;
+  safeMonthlyPayment: number;
+  risk: Credit['risk'] | string;
+  eligibility: number;
+  level: string;
+  nextTierAmount: number;
+  pointsToNextTier: number;
+};
+
+type ObtainCreditResponse = {
+  loan: {
+    id: string;
+    amount: number;
+    termMonths: number;
+    purpose: string;
+    monthlyPayment: number;
+    status: string;
+    createdAt: string;
+  };
+  credit: CreditProfileResponse;
+  wallet: {
+    previousBalance: number;
+    currentBalance: number;
+    currency: string;
+  };
 };
 
 type TransferNfcResponse = {
@@ -375,9 +403,6 @@ let walletHomeCache: ReturnType<typeof mapWalletHome> | null = null;
 let walletHomeCachedAt = 0;
 const CACHE_TTL_MS = 15_000;
 
-let localWalletCreditTopUp = 0;
-let localCreditUsed = 0;
-
 function currentUserId(): string | null {
   // El backend identifica el contexto con el access_token. No usamos un ID
   // hardcodeado: si no hay token, no llamamos a las functions.
@@ -434,11 +459,7 @@ export async function getUser(): Promise<User> {
 
 export async function getWallet(): Promise<Wallet> {
   const home = await getWalletHome();
-  if (!localWalletCreditTopUp) return home.wallet;
-  return {
-    ...home.wallet,
-    balance: home.wallet.balance + localWalletCreditTopUp,
-  };
+  return home.wallet;
 }
 
 export async function getPassport(): Promise<Passport> {
@@ -455,34 +476,58 @@ export async function getPassport(): Promise<Passport> {
   );
 }
 
-function getLocalCredit(): Credit {
-  const remaining = Math.max(0, mockCredit.estimatedAmount - localCreditUsed);
-  return {
-    ...mockCredit,
-    estimatedAmount: remaining,
-    potentialAmount: Math.max(remaining, mockCredit.potentialAmount - localCreditUsed),
-  };
-}
-
 export async function getCredit(): Promise<Credit> {
   return withFallback(
-    'get-credit-status',
-    async () => invokeFunction<CreditStatusResponse>('get-credit-status', {}),
-    getLocalCredit()
+    'get-credit-profile',
+    async () => {
+      const data = await invokeFunction<CreditProfileResponse>('get-credit-profile', {});
+      return {
+        estimatedAmount: data.availableAmount,
+        safeMonthlyPayment: data.safeMonthlyPayment,
+        risk: ['bajo', 'medio-bajo', 'medio', 'medio-alto', 'alto'].includes(String(data.risk))
+          ? (data.risk as Credit['risk'])
+          : mockCredit.risk,
+        eligibility: data.eligibility,
+        potentialAmount: data.nextTierAmount || data.maxAmount,
+        level: data.level,
+      };
+    },
+    mockCredit
   );
 }
 
-export function obtainCreditAmount(amount: number) {
-  const available = Math.max(0, mockCredit.estimatedAmount - localCreditUsed);
-  const approvedAmount = Math.max(0, Math.min(amount, available));
-  localCreditUsed += approvedAmount;
-  localWalletCreditTopUp += approvedAmount;
+export async function getCreditProfile(): Promise<CreditProfileResponse> {
+  return withFallback(
+    'get-credit-profile',
+    async () => invokeFunction<CreditProfileResponse>('get-credit-profile', {}),
+    {
+      availableAmount: mockCredit.estimatedAmount,
+      maxAmount: mockCredit.estimatedAmount,
+      usedAmount: 0,
+      safeMonthlyPayment: mockCredit.safeMonthlyPayment,
+      risk: mockCredit.risk,
+      eligibility: mockCredit.eligibility,
+      level: mockCredit.level,
+      nextTierAmount: mockCredit.potentialAmount,
+      pointsToNextTier: Math.max(0, mockUser.nextLevelPoints - mockUser.points),
+    }
+  );
+}
+
+export async function obtainCreditAmount(input: {
+  amount: number;
+  months: number;
+  reason: string;
+  simulation: SimulatorResult;
+}): Promise<ObtainCreditResponse> {
+  const result = await invokeFunction<ObtainCreditResponse>('obtain-credit', {
+    amount: input.amount,
+    termMonths: input.months,
+    purpose: input.reason,
+    simulation: input.simulation,
+  });
   invalidateWalletHomeCache();
-  return {
-    approvedAmount,
-    remainingCredit: Math.max(0, mockCredit.estimatedAmount - localCreditUsed),
-    walletTopUp: localWalletCreditTopUp,
-  };
+  return result;
 }
 
 export async function getTransactions(): Promise<Transaction[]> {

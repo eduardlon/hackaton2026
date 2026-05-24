@@ -30,7 +30,7 @@ import {
 } from '@/components';
 import { Selector } from '@/components/Selector';
 import { useFinancialRealtime } from '@/hooks/useFinancialRealtime';
-import { getCredit, getWallet, obtainCreditAmount, simulateLoan } from '@/services/api';
+import { getCreditProfile, getWallet, obtainCreditAmount, simulateLoan } from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 import type { Credit, SimulatorResult, Wallet } from '@/types';
@@ -56,12 +56,14 @@ const REASON_OPTIONS = [
 
 const STEP = 100000;
 const MIN_AMOUNT = 100000;
+type CreditProfile = Awaited<ReturnType<typeof getCreditProfile>>;
 
 export default function CreditoScreen() {
   const { theme } = useTheme();
   const user = useAuthStore((s) => s.user);
 
   const [credit, setCredit] = useState<Credit | null>(null);
+  const [creditProfile, setCreditProfile] = useState<CreditProfile | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [amount, setAmount] = useState(100000);
   const [months, setMonths] = useState(6);
@@ -72,14 +74,44 @@ export default function CreditoScreen() {
   const [disbursedAmount, setDisbursedAmount] = useState(0);
 
   const loadCreditData = async () => {
-    const [c, w] = await Promise.all([getCredit(), getWallet()]);
-    setCredit(c);
+    const [profile, w] = await Promise.all([getCreditProfile(), getWallet()]);
+    setCreditProfile(profile);
+    setCredit({
+      estimatedAmount: profile.availableAmount,
+      safeMonthlyPayment: profile.safeMonthlyPayment,
+      risk: ['bajo', 'medio-bajo', 'medio', 'medio-alto', 'alto'].includes(String(profile.risk))
+        ? (profile.risk as Credit['risk'])
+        : 'medio-bajo',
+      eligibility: profile.eligibility,
+      potentialAmount: profile.nextTierAmount || profile.maxAmount,
+      level: profile.level,
+    });
     setWallet(w);
-    setAmount((current) => Math.min(Math.max(MIN_AMOUNT, current), Math.max(MIN_AMOUNT, c.estimatedAmount)));
+    setAmount((current) => Math.min(Math.max(MIN_AMOUNT, current), Math.max(MIN_AMOUNT, profile.availableAmount)));
   };
 
   useEffect(() => {
-    loadCreditData();
+    let cancelled = false;
+    (async () => {
+      const [profile, w] = await Promise.all([getCreditProfile(), getWallet()]);
+      if (cancelled) return;
+      setCreditProfile(profile);
+      setCredit({
+        estimatedAmount: profile.availableAmount,
+        safeMonthlyPayment: profile.safeMonthlyPayment,
+        risk: ['bajo', 'medio-bajo', 'medio', 'medio-alto', 'alto'].includes(String(profile.risk))
+          ? (profile.risk as Credit['risk'])
+          : 'medio-bajo',
+        eligibility: profile.eligibility,
+        potentialAmount: profile.nextTierAmount || profile.maxAmount,
+        level: profile.level,
+      });
+      setWallet(w);
+      setAmount((current) => Math.min(Math.max(MIN_AMOUNT, current), Math.max(MIN_AMOUNT, profile.availableAmount)));
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useFinancialRealtime(user?.id ?? 'demo-user-001', () => {
@@ -87,6 +119,8 @@ export default function CreditoScreen() {
   });
 
   const available = credit?.estimatedAmount ?? 0;
+  const nextTierAmount = creditProfile?.nextTierAmount ?? credit?.potentialAmount ?? 0;
+  const pointsToNextTier = creditProfile?.pointsToNextTier ?? 0;
   const canRequest = available > 0;
   const requestAmount = Math.min(amount, available);
   const remainingAfterSimulation = Math.max(0, available - requestAmount);
@@ -136,17 +170,27 @@ export default function CreditoScreen() {
 
   const handleObtainCredit = async () => {
     if (!result || !canRequest) return;
-    const outcome = obtainCreditAmount(requestAmount);
-    const [nextCredit, nextWallet] = await Promise.all([getCredit(), getWallet()]);
-    setCredit(nextCredit);
+    const outcome = await obtainCreditAmount({ amount: requestAmount, months, reason, simulation: result });
+    const [nextProfile, nextWallet] = await Promise.all([getCreditProfile(), getWallet()]);
+    setCreditProfile(nextProfile);
+    setCredit({
+      estimatedAmount: nextProfile.availableAmount,
+      safeMonthlyPayment: nextProfile.safeMonthlyPayment,
+      risk: ['bajo', 'medio-bajo', 'medio', 'medio-alto', 'alto'].includes(String(nextProfile.risk))
+        ? (nextProfile.risk as Credit['risk'])
+        : 'medio-bajo',
+      eligibility: nextProfile.eligibility,
+      potentialAmount: nextProfile.nextTierAmount || nextProfile.maxAmount,
+      level: nextProfile.level,
+    });
     setWallet(nextWallet);
-    setDisbursedAmount(outcome.approvedAmount);
-    setAmount(Math.max(MIN_AMOUNT, outcome.remainingCredit));
+    setDisbursedAmount(outcome.loan.amount);
+    setAmount(Math.max(MIN_AMOUNT, nextProfile.availableAmount));
     setResult(null);
     setResultKey((k) => k + 1);
     Alert.alert(
       'Crédito desembolsado',
-      `${formatMoney(outcome.approvedAmount)} fueron enviados a tu billetera. Te queda disponible ${formatMoney(outcome.remainingCredit)}.`
+      `${formatMoney(outcome.loan.amount)} fueron enviados a tu billetera. Te queda disponible ${formatMoney(nextProfile.availableAmount)}.`
     );
   };
 
@@ -225,6 +269,14 @@ export default function CreditoScreen() {
         </View>
 
         <ProgressBar value={credit?.eligibility ?? 0} duration={900} delay={120} />
+
+        <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.primarySoft }}>
+          <Text variant="bodySmall" tone="primary">
+            {pointsToNextTier > 0
+              ? `Te faltan ${pointsToNextTier} puntos para subir tu cupo a ${formatMoney(nextTierAmount)}.`
+              : `Ya puedes aspirar al siguiente cupo de ${formatMoney(nextTierAmount)} según tu Pasaporte.`}
+          </Text>
+        </View>
 
         {disbursedAmount > 0 ? (
           <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.primarySoft }}>
