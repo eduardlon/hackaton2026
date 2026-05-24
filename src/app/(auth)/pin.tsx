@@ -6,13 +6,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import {
   Easing,
+  default as Animated,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {

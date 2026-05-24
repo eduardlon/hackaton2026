@@ -54,7 +54,6 @@ async function withFallback<T>(label: string, fn: () => Promise<T>, fallback: T)
     return await fn();
   } catch (err) {
     if (__DEV__) {
-      // eslint-disable-next-line no-console
       console.warn(`[api:${label}] fallback al mock —`, (err as Error).message);
     }
     return fallback;
@@ -82,7 +81,7 @@ type WalletHomeResponse = {
     progressPercentage: number;
     nextBenefit: string;
   };
-  recentTransactions: Array<{
+  recentTransactions: {
     id: string;
     type: string;
     amount: number;
@@ -90,7 +89,7 @@ type WalletHomeResponse = {
     description: string;
     status: string;
     createdAt: string;
-  }>;
+  }[];
 };
 
 type PassportResponse = {
@@ -101,13 +100,13 @@ type PassportResponse = {
   progressPercentage: number;
   nextBenefit: string;
   recommendations: string[];
-  events: Array<{
+  events: {
     id: string;
     eventType: string;
     pointsDelta: number;
     reason: string;
     createdAt: string;
-  }>;
+  }[];
 };
 
 type SimulateLoanResponse = {
@@ -133,9 +132,76 @@ type TransferNfcResponse = {
 type FinancialChatResponse = {
   answer: string;
   riskLevel: string;
-  cards: Array<{ title: string; value: string }>;
+  cards: { title: string; value: string }[];
   suggestedActions: string[];
   disclaimer: string;
+};
+
+type ProcessInvoiceResponse = {
+  documentId: string;
+  status: string;
+  usedFallback: boolean;
+  model: string;
+  extracted: {
+    provider: string | null;
+    amount: number | null;
+    currency: string;
+    dueDate: string | null;
+    reference: string | null;
+    category: string | null;
+    concept: string | null;
+    documentType: string;
+    confidence: number;
+    requiresReview: boolean;
+    warnings: string[];
+  };
+};
+
+type ConfirmBillPaymentResponse = {
+  payment: {
+    id: string;
+    status: string;
+    provider: string;
+    amount: number;
+    reference: string;
+    paidAt: string;
+  };
+  transaction: {
+    id: string;
+    type: string;
+    amount: number;
+    category: string;
+    description: string;
+    status: string;
+  };
+  passportUpdate: {
+    eventId: string;
+    pointsAdded: number;
+    reason: string;
+    currentPoints: number;
+    level: number;
+    levelName: string;
+    progressPercentage: number;
+  };
+  wallet: {
+    previousBalance: number;
+    currentBalance: number;
+    currency: string;
+  };
+};
+
+type RecordFinancialActivityResponse = {
+  transaction: {
+    id: string;
+    type: string;
+    amount: number;
+    category: string;
+    description: string;
+    status: string;
+    createdAt: string;
+  };
+  passportUpdate: ConfirmBillPaymentResponse['passportUpdate'];
+  wallet: ConfirmBillPaymentResponse['wallet'];
 };
 
 // ──────────────────────────────────────────────────────────
@@ -237,7 +303,9 @@ function mapWalletHome(res: WalletHomeResponse): {
     return {
       id: t.id,
       title: t.description,
-      amount: t.amount,
+      amount: ['bill_payment', 'expense', 'transfer_out', 'loan_payment'].includes(t.type)
+        ? -Math.abs(t.amount)
+        : Math.abs(t.amount),
       time: timeFromIso(t.createdAt),
       points: 0,
       category,
@@ -492,4 +560,50 @@ export async function confirmNfcTransfer(
 
 export async function askFinancialChat(message: string): Promise<FinancialChatResponse> {
   return invokeFunction<FinancialChatResponse>('financial-chat', { message });
+}
+
+export async function processInvoiceDemo(): Promise<ProcessInvoiceResponse> {
+  return invokeFunction<ProcessInvoiceResponse>('process-invoice', {
+    demoMode: true,
+    provider: 'Afinia',
+    amount: 185400,
+    currency: 'COP',
+    dueDate: '2026-05-28',
+    reference: `AFINIA-DEMO-${Date.now()}`,
+    category: 'Servicios públicos',
+  });
+}
+
+export async function confirmBillPaymentFromInvoice(
+  invoice: ProcessInvoiceResponse
+): Promise<ConfirmBillPaymentResponse> {
+  const { extracted } = invoice;
+  if (!extracted.provider || !extracted.amount || !extracted.reference) {
+    throw new Error('La factura necesita proveedor, valor y referencia antes de pagar.');
+  }
+
+  const result = await invokeFunction<ConfirmBillPaymentResponse>('confirm-bill-payment', {
+    documentId: invoice.documentId,
+    provider: extracted.provider,
+    amount: extracted.amount,
+    currency: extracted.currency || 'COP',
+    dueDate: extracted.dueDate,
+    reference: extracted.reference,
+    category: extracted.category || 'Servicios públicos',
+    confirmedByUser: true,
+    pinConfirmed: true,
+  });
+  invalidateWalletHomeCache();
+  return result;
+}
+
+export async function recordFinancialActivity(input: {
+  type: 'income' | 'sale';
+  amount: number;
+  category: string;
+  description: string;
+}): Promise<RecordFinancialActivityResponse> {
+  const result = await invokeFunction<RecordFinancialActivityResponse>('record-financial-activity', input);
+  invalidateWalletHomeCache();
+  return result;
 }

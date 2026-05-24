@@ -9,19 +9,14 @@
  *   - PIN guardado en SecureStore con candado biométrico para login con huella
  *
  * Backend Insforge esperado (Edge Functions):
- *   - `auth-lookup-phone` { phone }                  → { exists, user? }
- *   - `auth-register`     { phone, name, pin }        → { user, session }
- *   - `auth-login-pin`    { phone, pin }              → { user, session }
+ *   - `demo-login` { phone, pin }                     → { user, session }
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 const baseUrl = (process.env.EXPO_PUBLIC_INSFORGE_URL ?? '').replace(/\/$/, '');
 const functionsUrl = (process.env.EXPO_PUBLIC_INSFORGE_FUNCTIONS_URL ?? '').replace(/\/$/, '');
 const anonKey = process.env.EXPO_PUBLIC_INSFORGE_ANON_KEY ?? '';
-
-const PIN_PEPPER = 'fingrow.v1';
 
 export function isInsforgeConfigured() {
   return Boolean(baseUrl || functionsUrl);
@@ -91,7 +86,6 @@ export async function enableBiometricUnlock(phone: string, pin: string): Promise
     });
   } catch (err) {
     if (__DEV__) {
-      // eslint-disable-next-line no-console
       console.warn('[secure-store] no se pudo guardar PIN protegido:', err);
     }
   }
@@ -169,20 +163,10 @@ function functionUrl(slug: string) {
   return `${baseUrl}/functions/v1/${slug}`;
 }
 
-// ──────────────────────────────────────────────────────────
-// PIN hashing (cliente) — el backend debe re-hashear con bcrypt/argon2
-// pero enviamos un hash determinístico para no exponer el PIN en logs.
-// ──────────────────────────────────────────────────────────
-
 export function normalizePhone(input: string): string {
   // Quita espacios y guiones, asegura prefijo +
   const clean = input.replace(/\D/g, '');
   return clean.startsWith('57') ? `+${clean}` : `+57${clean}`;
-}
-
-async function hashPin(phone: string, pin: string): Promise<string> {
-  const material = `${PIN_PEPPER}::${phone}::${pin}`;
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, material);
 }
 
 // ──────────────────────────────────────────────────────────
@@ -199,13 +183,13 @@ export type AuthUser = {
 
 type AuthSessionResponse = {
   user?: AuthUser;
-  session?: { access_token?: string; refresh_token?: string };
+  session?: { access_token?: string; refresh_token?: string; token?: string };
   access_token?: string;
 };
 
 function extractAuth(payload: AuthSessionResponse, phoneFallback: string): AuthUser {
   const user = payload.user;
-  const token = payload.session?.access_token ?? payload.access_token;
+  const token = payload.session?.access_token ?? payload.session?.token ?? payload.access_token;
   if (!user || !token) {
     throw new Error('Respuesta de Insforge incompleta');
   }
@@ -225,26 +209,8 @@ function extractAuth(payload: AuthSessionResponse, phoneFallback: string): AuthU
 
 export async function lookupPhone(phone: string): Promise<{ exists: boolean; name?: string }> {
   const normalized = normalizePhone(phone);
-  if (!isInsforgeConfigured()) {
-    return { exists: false };
-  }
-  try {
-    const res = await fetch(functionUrl('auth-lookup-phone'), {
-      method: 'POST',
-      headers: buildHeaders(),
-      body: JSON.stringify({ phone: normalized }),
-    });
-    if (!res.ok) throw await parseError(res, 'No se pudo buscar el celular');
-    const data = (await res.json()) as { exists?: boolean; user?: { name?: string } };
-    return { exists: !!data.exists, name: data.user?.name };
-  } catch (err) {
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.warn('[auth-lookup-phone] fallback (asumimos nuevo):', (err as Error).message);
-    }
-    // Si la function no existe todavía, asumimos que el usuario es nuevo
-    return { exists: false };
-  }
+  if (normalized === '+573001112233') return { exists: true, name: 'Laura Martínez' };
+  return { exists: false };
 }
 
 export async function registerWithPhone(
@@ -259,20 +225,17 @@ export async function registerWithPhone(
     throw new Error('El PIN debe tener exactamente 4 dígitos');
   }
   const normalized = normalizePhone(phone);
-  const pinHash = await hashPin(normalized, pin);
-
-  const res = await fetch(functionUrl('auth-register'), {
+  const res = await fetch(functionUrl('demo-login'), {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({
       phone: normalized,
-      name: name.trim(),
-      pinHash,
-      pin, // backend hace su propio hashing fuerte; el hash de arriba es defensa en profundidad
+      pin,
     }),
   });
 
-  if (!res.ok) throw await parseError(res, 'No fue posible crear tu cuenta');
+  void name;
+  if (!res.ok) throw await parseError(res, 'No fue posible crear tu sesión demo');
   const payload = (await res.json()) as AuthSessionResponse;
   await storePhone(normalized);
   return extractAuth(payload, normalized);
@@ -286,14 +249,11 @@ export async function loginWithPin(phone: string, pin: string): Promise<AuthUser
   if (!isInsforgeConfigured()) {
     throw new Error('Insforge no está configurado. Revisa tu .env');
   }
-  const pinHash = await hashPin(normalized, pin);
-
-  const res = await fetch(functionUrl('auth-login-pin'), {
+  const res = await fetch(functionUrl('demo-login'), {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({
       phone: normalized,
-      pinHash,
       pin,
     }),
   });
