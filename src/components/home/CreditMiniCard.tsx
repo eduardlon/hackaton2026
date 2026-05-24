@@ -16,7 +16,7 @@ export function CreditMiniCard({ credit, delay = 0, onSimulate }: Props) {
   const { theme } = useTheme();
 
   return (
-    <Card delay={delay} padded style={{ padding: 18, gap: 14, flex: 1 }}>
+    <Card delay={delay} padded style={{ padding: 18, gap: 16, width: '100%' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text variant="h3">Crédito estimado</Text>
         <View
@@ -42,8 +42,8 @@ export function CreditMiniCard({ credit, delay = 0, onSimulate }: Props) {
         </Text>
       </View>
 
-      <View style={{ gap: 10 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Calendar size={14} color={theme.colors.textMuted} />
           <View>
             <Text variant="micro" tone="muted">
@@ -52,7 +52,7 @@ export function CreditMiniCard({ credit, delay = 0, onSimulate }: Props) {
             <Text variant="caption">{formatMoney(credit.safeMonthlyPayment)}/mes</Text>
           </View>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <ShieldCheck size={14} color={theme.colors.textMuted} />
           <View>
             <Text variant="micro" tone="muted">

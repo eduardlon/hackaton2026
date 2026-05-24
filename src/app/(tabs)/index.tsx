@@ -5,16 +5,10 @@ import { ActivityIndicator, Alert, View } from 'react-native';
 import { Header, ScreenContainer } from '@/components';
 import { AIInsightCard } from '@/components/home/AIInsightCard';
 import { CreditMiniCard } from '@/components/home/CreditMiniCard';
-import { PassportCard } from '@/components/home/PassportCard';
 import { QuickActions } from '@/components/home/QuickActions';
-import { RecentMovesCard } from '@/components/home/RecentMovesCard';
 import { SummaryCard } from '@/components/home/SummaryCard';
-import { UpcomingPaymentsCard } from '@/components/home/UpcomingPaymentsCard';
 import {
   getCredit,
-  getPassport,
-  getTransactions,
-  getUpcomingPayments,
   getWallet,
   askFinancialChat,
   confirmBillPaymentFromInvoice,
@@ -24,9 +18,6 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import type {
   Credit,
-  Passport,
-  Transaction,
-  UpcomingPayment,
   Wallet,
 } from '@/types';
 
@@ -36,24 +27,15 @@ export default function HomeScreen() {
 
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [credit, setCredit] = useState<Credit | null>(null);
-  const [passport, setPassport] = useState<Passport | null>(null);
-  const [payments, setPayments] = useState<UpcomingPayment[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const loadHome = async () => {
-      const [w, c, p, up, tx] = await Promise.all([
-        getWallet(),
-        getCredit(),
-        getPassport(),
-        getUpcomingPayments(),
-        getTransactions(),
-      ]);
-      setWallet(w);
-      setCredit(c);
-      setPassport(p);
-      setPayments(up);
-      setTransactions(tx);
+    const [w, c] = await Promise.all([
+      getWallet(),
+      getCredit(),
+    ]);
+    setWallet(w);
+    setCredit(c);
   };
 
   useEffect(() => {
@@ -173,22 +155,13 @@ export default function HomeScreen() {
       <View style={{ gap: 14 }}>
         {wallet ? <SummaryCard wallet={wallet} delay={0} /> : null}
 
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          {credit ? (
-            <CreditMiniCard
-              credit={credit}
-              delay={120}
-              onSimulate={() => router.push('/(tabs)/credito')}
-            />
-          ) : null}
-          {passport ? (
-            <PassportCard
-              passport={passport}
-              delay={200}
-              onPress={() => router.push('/(tabs)/analisis')}
-            />
-          ) : null}
-        </View>
+        {credit ? (
+          <CreditMiniCard
+            credit={credit}
+            delay={120}
+            onSimulate={() => router.push('/(tabs)/credito')}
+          />
+        ) : null}
 
         <QuickActions delay={280} onAction={handleQuickAction} />
 
@@ -204,18 +177,6 @@ export default function HomeScreen() {
           onPress={() => router.push('/(tabs)/analisis')}
         />
 
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <UpcomingPaymentsCard
-            delay={440}
-            payments={payments}
-            onSeeAll={() => router.push('/(tabs)/movimientos')}
-          />
-          <RecentMovesCard
-            delay={520}
-            transactions={transactions}
-            onSeeAll={() => router.push('/(tabs)/movimientos')}
-          />
-        </View>
       </View>
     </ScreenContainer>
   );
