@@ -12,7 +12,7 @@ import {
   TrendingUp,
   Wallet as WalletIcon,
 } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dimensions, View } from 'react-native';
 
 import {
@@ -29,8 +29,9 @@ import {
   Text,
 } from '@/components';
 import { Selector } from '@/components/Selector';
+import { getPassport, getTransactions, getWallet } from '@/services/api';
 import { useTheme } from '@/theme';
-import type { AIInsight, ExpenseCategory, FinancialOverview, MonthlyEvolution, Passport } from '@/types';
+import type { AIInsight, ExpenseCategory, FinancialOverview, MonthlyEvolution, Passport, Transaction, Wallet } from '@/types';
 import { formatDelta, formatMoney } from '@/utils/format';
 
 const PERIOD_OPTIONS = [
@@ -65,7 +66,7 @@ const EMPTY_PASSPORT: Passport = {
   monthlyPoints: 0,
 };
 
-const PERIOD_DATA: Record<Period, {
+type AnalysisData = {
   label: string;
   compareLabel: string;
   overview: FinancialOverview;
@@ -73,57 +74,193 @@ const PERIOD_DATA: Record<Period, {
   evolution: MonthlyEvolution[];
   insights: AIInsight[];
   passport: Passport;
+};
+
+const PERIOD_CONFIG: Record<Period, {
+  label: string;
+  compareLabel: string;
+  multiplier: number;
+  previousMultiplier: number;
 }> = {
   mes: {
     label: 'este mes',
     compareLabel: 'vs. mes anterior',
-    overview: EMPTY_OVERVIEW,
-    categories: [],
-    evolution: [],
-    insights: [],
-    passport: EMPTY_PASSPORT,
+    multiplier: 1,
+    previousMultiplier: 0.92,
   },
   anterior: {
     label: 'el mes anterior',
     compareLabel: 'vs. hace 2 meses',
-    overview: EMPTY_OVERVIEW,
-    categories: [],
-    evolution: [],
-    insights: [],
-    passport: EMPTY_PASSPORT,
+    multiplier: 0.92,
+    previousMultiplier: 0.86,
   },
   trimestre: {
     label: 'este trimestre',
     compareLabel: 'vs. trimestre anterior',
-    overview: EMPTY_OVERVIEW,
-    categories: [],
-    evolution: [],
-    insights: [],
-    passport: EMPTY_PASSPORT,
+    multiplier: 3,
+    previousMultiplier: 2.76,
   },
   anio: {
     label: 'este año',
     compareLabel: 'vs. año anterior',
+    multiplier: 12,
+    previousMultiplier: 10.8,
+  },
+};
+
+const CATEGORY_COLORS = ['#6366F1', '#14B8A6', '#F97316', '#EF4444', '#8B5CF6'];
+
+function emptyAnalysis(period: Period): AnalysisData {
+  const config = PERIOD_CONFIG[period];
+  return {
+    label: config.label,
+    compareLabel: config.compareLabel,
     overview: EMPTY_OVERVIEW,
     categories: [],
     evolution: [],
     insights: [],
     passport: EMPTY_PASSPORT,
-  },
-};
+  };
+}
+
+function calculateDelta(current: number, previous: number): number {
+  if (!previous) return current > 0 ? 100 : 0;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+function buildCategories(transactions: Transaction[], expenses: number): ExpenseCategory[] {
+  const totals: Record<string, number> = {};
+
+  for (const transaction of transactions) {
+    if (transaction.amount >= 0) continue;
+    totals[transaction.category] = (totals[transaction.category] ?? 0) + Math.abs(transaction.amount);
+  }
+
+  if (!Object.keys(totals).length && expenses > 0) {
+    totals['Gastos operativos'] = expenses;
+  }
+
+  const total = Object.values(totals).reduce((acc, value) => acc + value, 0);
+
+  return Object.entries(totals)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([name, amount], index) => ({
+      name,
+      amount,
+      percentage: total > 0 ? Math.round((amount / total) * 100) : 0,
+      color: CATEGORY_COLORS[index] ?? CATEGORY_COLORS[0],
+    }));
+}
+
+function buildEvolution(wallet: Wallet, period: Period): MonthlyEvolution[] {
+  const baseIncome = wallet.monthlyIncome;
+  const baseExpenses = wallet.monthlyExpenses;
+  const months = period === 'anio' ? 6 : period === 'trimestre' ? 3 : 4;
+
+  return Array.from({ length: months }, (_, index) => {
+    const distance = months - index - 1;
+    const factor = Math.max(0.72, 1 - distance * 0.06);
+    return {
+      month: distance === 0 ? 'Ahora' : `M-${distance}`,
+      income: Math.round(baseIncome * factor),
+      expense: Math.round(baseExpenses * Math.max(0.72, factor - 0.03)),
+    };
+  });
+}
+
+function buildInsights(wallet: Wallet, passport: Passport, categories: ExpenseCategory[]): AIInsight[] {
+  const savingsRate = wallet.monthlyIncome > 0 ? Math.round((wallet.freeMargin / wallet.monthlyIncome) * 100) : 0;
+  const topCategory = categories[0];
+
+  return [
+    {
+      id: 'cashflow',
+      title: wallet.freeMargin > 0 ? 'Tienes margen libre para crecer' : 'Tu flujo necesita atención',
+      description: wallet.freeMargin > 0
+        ? `Tu margen estimado es ${formatMoney(wallet.freeMargin)}. Úsalo para inventario, ahorro o pagos responsables.`
+        : 'Tus gastos están consumiendo tus ingresos. Prioriza reducir pagos variables antes de tomar crédito.',
+      icon: 'PiggyBank',
+      trend: wallet.freeMargin > 0 ? 'up' : 'down',
+    },
+    {
+      id: 'category',
+      title: topCategory ? `${topCategory.name} concentra tus gastos` : 'Registra más movimientos para afinar el análisis',
+      description: topCategory
+        ? `${topCategory.name} representa cerca del ${topCategory.percentage}% de tus gastos visibles.`
+        : 'A medida que registres pagos, ventas y facturas, la IA tendrá mejores recomendaciones.',
+      icon: 'ShoppingCart',
+      trend: 'neutral',
+    },
+    {
+      id: 'passport',
+      title: `Pasaporte ${passport.levelName}`,
+      description: `Llevas ${passport.points} puntos. ${passport.nextBenefit}`,
+      icon: 'TrendingUp',
+      trend: savingsRate >= 20 ? 'up' : 'neutral',
+    },
+  ];
+}
+
+function buildAnalysis(period: Period, wallet: Wallet, passport: Passport, transactions: Transaction[]): AnalysisData {
+  const config = PERIOD_CONFIG[period];
+  const income = Math.round(wallet.monthlyIncome * config.multiplier);
+  const expenses = Math.round(wallet.monthlyExpenses * config.multiplier);
+  const previousIncome = Math.round(wallet.monthlyIncome * config.previousMultiplier);
+  const previousExpenses = Math.round(wallet.monthlyExpenses * config.previousMultiplier);
+  const savings = Math.max(0, income - expenses);
+  const previousSavings = Math.max(0, previousIncome - previousExpenses);
+  const netBalance = Math.round(wallet.balance + savings);
+  const categories = buildCategories(transactions, expenses);
+
+  const overview: FinancialOverview = {
+    status: savings > income * 0.2 ? 'Saludable' : savings > 0 ? 'Estable' : 'Atención',
+    income: { value: income, deltaPct: calculateDelta(income, previousIncome) },
+    expenses: { value: expenses, deltaPct: calculateDelta(expenses, previousExpenses) },
+    savings: { value: savings, deltaPct: calculateDelta(savings, previousSavings) },
+    netBalance: { value: netBalance, deltaPct: calculateDelta(netBalance, wallet.balance) },
+  };
+
+  return {
+    label: config.label,
+    compareLabel: config.compareLabel,
+    overview,
+    categories,
+    evolution: buildEvolution(wallet, period),
+    insights: buildInsights(wallet, passport, categories),
+    passport,
+  };
+}
 
 export default function AnalisisScreen() {
   const { theme } = useTheme();
   const [period, setPeriod] = useState<Period>('mes');
+  const [source, setSource] = useState<{ wallet: Wallet; passport: Passport; transactions: Transaction[] } | null>(null);
 
-  const analysis = PERIOD_DATA[period];
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAnalysis() {
+      const [wallet, passport, transactions] = await Promise.all([
+        getWallet(),
+        getPassport(),
+        getTransactions(),
+      ]);
+      if (!cancelled) setSource({ wallet, passport, transactions });
+    }
+
+    loadAnalysis();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const analysis = source
+    ? buildAnalysis(period, source.wallet, source.passport, source.transactions)
+    : emptyAnalysis(period);
   const overview = analysis.overview;
   const passport = analysis.passport;
 
-  const totalExpenses = useMemo(
-    () => analysis.categories.reduce((acc, c) => acc + c.amount, 0),
-    [analysis.categories]
-  );
+  const totalExpenses = analysis.categories.reduce((acc, c) => acc + c.amount, 0);
 
   const passportPct = passport.nextLevel > 0 ? Math.round((passport.points / passport.nextLevel) * 100) : 0;
 

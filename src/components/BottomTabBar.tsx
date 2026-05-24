@@ -1,3 +1,11 @@
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from 'expo-audio';
+import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -14,7 +22,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, View } from 'react-native';
 import Animated, {
   Easing,
@@ -27,7 +35,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
-import { askFinancialChat } from '@/services/api';
+import { askVoiceFinancialChat } from '@/services/api';
 import { useTheme } from '@/theme';
 
 import { PressableScale } from './PressableScale';
@@ -46,9 +54,6 @@ const LABEL_MAP: Record<string, string> = {
   credito: 'Crédito',
   analisis: 'Análisis',
 };
-
-const QUICK_AI_PROMPT =
-  'Dame una recomendación financiera corta, concreta y accionable para hoy según mi estado financiero.';
 
 const QUICK_ACTION = {
   TRANSFER: 'transfer',
@@ -93,43 +98,36 @@ const QUICK_MENU_ACTIONS: QuickMenuAction[] = [
   },
 ];
 
-function QuickAIModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+type VoiceStatus = 'recording' | 'transcribing' | 'answer' | 'error';
+
+function VoiceAIModal({
+  visible,
+  status,
+  transcript,
+  answer,
+  error,
+  onClose,
+}: {
+  visible: boolean;
+  status: VoiceStatus;
+  transcript: string;
+  answer: string;
+  error: string;
+  onClose: () => void;
+}) {
   const { theme } = useTheme();
-  const [status, setStatus] = useState<'listening' | 'thinking' | 'answer'>('listening');
-  const [answer, setAnswer] = useState('');
   const pulse = useSharedValue(0);
 
   useEffect(() => {
     if (!visible) return;
 
-    setStatus('listening');
-    setAnswer('');
     pulse.value = withRepeat(
       withTiming(1, { duration: 1300, easing: Easing.out(Easing.cubic) }),
       -1,
       false
     );
 
-    const timeout = setTimeout(() => {
-      setStatus('thinking');
-      askFinancialChat(QUICK_AI_PROMPT)
-        .then((res) => {
-          const text =
-            res.answer ||
-            'Hoy mantén tu margen libre protegido, prioriza pagos próximos y evita asumir cuotas nuevas si reducen tu flujo.';
-          setAnswer(text);
-          setStatus('answer');
-        })
-        .catch(() => {
-          const fallback =
-            'Hoy cuida tu flujo: paga primero lo que vence pronto, registra tus ingresos y evita gastos que reduzcan tu margen disponible.';
-          setAnswer(fallback);
-          setStatus('answer');
-        });
-    }, 1100);
-
     return () => {
-      clearTimeout(timeout);
       pulse.value = 0;
     };
   }, [pulse, visible]);
@@ -223,7 +221,7 @@ function QuickAIModal({ visible, onClose }: { visible: boolean; onClose: () => v
                   ...theme.shadows.md,
                 }}
               >
-                {status === 'thinking' ? (
+                {status === 'transcribing' ? (
                   <ActivityIndicator color={theme.colors.primaryContrast} />
                 ) : (
                   <Mic size={30} color={theme.colors.primaryContrast} strokeWidth={2.4} />
@@ -232,16 +230,22 @@ function QuickAIModal({ visible, onClose }: { visible: boolean; onClose: () => v
             </View>
 
             <Text variant="h2" align="center">
-              {status === 'listening'
+              {status === 'recording'
                 ? 'Te estoy escuchando...'
-                : status === 'thinking'
-                  ? 'Analizando tu contexto...'
-                  : 'Esto te recomiendo'}
+                : status === 'transcribing'
+                  ? 'Escribiendo y analizando...'
+                  : status === 'error'
+                    ? 'No pude procesar el audio'
+                    : 'Esto entendí'}
             </Text>
             <Text variant="bodySmall" tone="muted" align="center">
-              {status === 'answer'
-                ? answer
-                : 'Mantén presionado el botón inteligente para abrir una recomendación inmediata en texto.'}
+              {status === 'recording'
+                ? 'Suelta el botón central cuando termines de hablar.'
+                : status === 'transcribing'
+                  ? 'Estoy transcribiendo tu voz y preparando la respuesta en el chat.'
+                  : status === 'error'
+                    ? error
+                    : `"${transcript}"\n\n${answer}`}
             </Text>
           </View>
         </View>
@@ -364,9 +368,13 @@ function QuickActionMenu({
 function QuickAIButton({
   onPress,
   onLongPress,
+  onPressOut,
+  active,
 }: {
   onPress: () => void;
   onLongPress: () => void;
+  onPressOut: () => void;
+  active: boolean;
 }) {
   const { theme } = useTheme();
 
@@ -374,6 +382,7 @@ function QuickAIButton({
     <PressableScale
       onPress={onPress}
       onLongPress={onLongPress}
+      onPressOut={onPressOut}
       delayLongPress={280}
       haptic="none"
       scaleTo={0.9}
@@ -397,8 +406,8 @@ function QuickAIButton({
           borderWidth: 4,
           borderColor: theme.colors.bg,
           shadowColor: theme.colors.primary,
-          shadowOpacity: 0.55,
-          shadowRadius: 16,
+          shadowOpacity: active ? 0.85 : 0.55,
+          shadowRadius: active ? 24 : 16,
           shadowOffset: { width: 0, height: 6 },
           elevation: 8,
         }}
@@ -523,7 +532,15 @@ export type AppTabBarProps = {
 export function BottomTabBar({ state, navigation }: AppTabBarProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const [aiVisible, setAiVisible] = useState(false);
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder, 250);
+  const voiceLongPressRef = useRef(false);
+  const voiceRecordingRef = useRef(false);
+  const [voiceVisible, setVoiceVisible] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('recording');
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceAnswer, setVoiceAnswer] = useState('');
+  const [voiceError, setVoiceError] = useState('');
   const [quickMenuVisible, setQuickMenuVisible] = useState(false);
   const visibleRoutes = state.routes.filter((route) => route.name !== 'perfil');
   const quickMenuBottomOffset = Math.max(insets.bottom, 10) + 72;
@@ -531,8 +548,83 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
   const openAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setQuickMenuVisible(false);
-    setAiVisible(false);
     router.push('/financial-agent');
+  };
+
+  const startVoiceAI = async () => {
+    if (voiceRecordingRef.current) return;
+
+    voiceLongPressRef.current = true;
+    setQuickMenuVisible(false);
+    setVoiceVisible(true);
+    setVoiceStatus('recording');
+    setVoiceTranscript('');
+    setVoiceAnswer('');
+    setVoiceError('');
+
+    try {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        throw new Error('Necesito permiso de micrófono para escuchar tu pregunta.');
+      }
+
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record({ forDuration: 15 });
+      voiceRecordingRef.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    } catch (error) {
+      voiceRecordingRef.current = false;
+      setVoiceStatus('error');
+      setVoiceError(error instanceof Error ? error.message : 'No pude iniciar la grabación.');
+    }
+  };
+
+  const stopVoiceAI = async () => {
+    if (!voiceRecordingRef.current) return;
+
+    voiceRecordingRef.current = false;
+    setVoiceStatus('transcribing');
+
+    try {
+      await audioRecorder.stop();
+      const uri = audioRecorder.uri;
+      if (!uri) throw new Error('No se pudo leer la grabación de audio.');
+
+      const file = new File(uri);
+      const audioBase64 = await file.base64();
+      const response = await askVoiceFinancialChat({
+        audioBase64,
+        mimeType: mimeTypeFromUri(uri),
+      });
+      const transcript = response.transcript.trim();
+      const answer = response.answer.trim();
+
+      setVoiceTranscript(transcript);
+      setVoiceAnswer(answer);
+      setVoiceStatus('answer');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+
+      setTimeout(() => {
+        setVoiceVisible(false);
+        router.push(
+          `/financial-agent?voiceTranscript=${encodeURIComponent(transcript)}&voiceAnswer=${encodeURIComponent(answer)}`
+        );
+      }, 850);
+    } catch (error) {
+      setVoiceStatus('error');
+      setVoiceError(
+        error instanceof Error
+          ? error.message
+          : 'No pude transcribir el audio. Intenta hablar más cerca del micrófono.'
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+    } finally {
+      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    }
   };
 
   const handleReceiveMoney = () => {
@@ -591,7 +683,14 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
 
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-      <QuickAIModal visible={aiVisible} onClose={() => setAiVisible(false)} />
+      <VoiceAIModal
+        visible={voiceVisible}
+        status={voiceStatus}
+        transcript={voiceTranscript}
+        answer={voiceAnswer}
+        error={voiceError}
+        onClose={() => setVoiceVisible(false)}
+      />
       <QuickActionMenu
         visible={quickMenuVisible}
         bottomOffset={quickMenuBottomOffset}
@@ -618,14 +717,29 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
           {visibleRoutes.slice(0, 2).map(renderTab)}
           <QuickAIButton
             onPress={() => {
+              if (voiceLongPressRef.current) {
+                voiceLongPressRef.current = false;
+                return;
+              }
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               setQuickMenuVisible((current) => !current);
             }}
-            onLongPress={openAI}
+            onLongPress={startVoiceAI}
+            onPressOut={stopVoiceAI}
+            active={recorderState.isRecording || voiceStatus === 'transcribing'}
           />
           {visibleRoutes.slice(2).map(renderTab)}
         </View>
       </View>
     </View>
   );
+}
+
+function mimeTypeFromUri(uri: string): string {
+  const lower = uri.toLowerCase();
+  if (lower.endsWith('.webm')) return 'audio/webm';
+  if (lower.endsWith('.3gp')) return 'audio/3gpp';
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  return 'audio/mp4';
 }

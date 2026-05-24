@@ -95,6 +95,8 @@ type TransferNfcResponse = {
   amount: number;
   from: { id: string; name: string };
   to: { id: string; name: string };
+  payerWallet?: ConfirmBillPaymentResponse['wallet'];
+  receiverWallet?: ConfirmBillPaymentResponse['wallet'];
 };
 
 type BrebPaymentResponse = {
@@ -122,6 +124,11 @@ export type FinancialChatResponse = {
   disclaimer: string;
   model?: string;
   usedFallback?: boolean;
+};
+
+export type VoiceFinancialChatResponse = FinancialChatResponse & {
+  transcript: string;
+  language?: string;
 };
 
 export type ProcessInvoiceResponse = {
@@ -457,8 +464,9 @@ export async function simulateLoan(input: SimulatorInput): Promise<SimulatorResu
 }
 
 export type NfcTransferPayload = {
-  fromUserId: string;
-  fromName: string;
+  kind: 'fingrow.nfc.charge';
+  receiverUserId: string;
+  receiverName: string;
   amount: number;
   reference: string;
   createdAt: string;
@@ -469,7 +477,7 @@ export async function confirmNfcTransfer(
   payload: NfcTransferPayload
 ): Promise<TransferNfcResponse> {
   const data = await invokeFunction<TransferNfcResponse>('confirm-nfc-transfer', {
-    fromUserId: payload.fromUserId,
+    receiverUserId: payload.receiverUserId,
     amount: payload.amount,
     reference: payload.reference,
     note: payload.note,
@@ -494,6 +502,18 @@ export async function askFinancialChat(
   history: FinancialChatHistoryItem[] = []
 ): Promise<FinancialChatResponse> {
   return invokeFunction<FinancialChatResponse>('financial-chat', { message, history });
+}
+
+export async function askVoiceFinancialChat(input: {
+  audioBase64: string;
+  mimeType: string;
+  history?: FinancialChatHistoryItem[];
+}): Promise<VoiceFinancialChatResponse> {
+  return invokeFunction<VoiceFinancialChatResponse>('voice-financial-chat', {
+    audioBase64: input.audioBase64,
+    mimeType: input.mimeType,
+    history: input.history ?? [],
+  });
 }
 
 export async function processInvoiceImage(

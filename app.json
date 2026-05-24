@@ -24,6 +24,7 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.NFC",
+        "android.permission.RECORD_AUDIO",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
         "android.permission.VIBRATE"
@@ -68,7 +69,13 @@
           "microphonePermission": false
         }
       ],
-      "react-native-nfc-manager"
+      "react-native-nfc-manager",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "FinGrow usa tu micrófono para que puedas hablar con el agente financiero IA."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

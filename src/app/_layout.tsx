@@ -14,6 +14,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { NfcChargeDetector } from '@/components/NfcChargeDetector';
 import { configureNotifications } from '@/services/notifications';
 import { useAuthStore } from '@/store/authStore';
 import { ThemeProvider, useTheme } from '@/theme';
@@ -75,6 +76,7 @@ function ThemedRoot() {
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
       <RootStack />
+      <NfcChargeDetector />
     </View>
   );
 }

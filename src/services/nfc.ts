@@ -1,8 +1,8 @@
 /**
- * Servicio NFC para transferencias peer-to-peer entre celulares.
+ * Servicio NFC para cobros tipo factura entre celulares.
  *
- * Requiere dev build (no Expo Go). El receptor usa Reader Mode para escuchar
- * continuamente; el emisor escribe un mensaje NDEF cuando los celulares se acercan.
+ * Requiere dev build (no Expo Go). El cobrador genera un payload de cobro
+ * y el pagador lo lee con la app abierta para confirmar el débito.
  */
 import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
@@ -79,7 +79,8 @@ function decodePayload(raw: string): NfcTransferPayload | null {
     const obj = JSON.parse(raw) as NfcTransferPayload;
     if (!obj || typeof obj !== 'object') return null;
     if (typeof obj.amount !== 'number' || obj.amount <= 0) return null;
-    if (typeof obj.fromUserId !== 'string' || !obj.fromUserId) return null;
+    if (obj.kind !== 'fingrow.nfc.charge') return null;
+    if (typeof obj.receiverUserId !== 'string' || !obj.receiverUserId) return null;
     if (typeof obj.reference !== 'string' || !obj.reference) return null;
     return obj;
   } catch {
@@ -118,7 +119,7 @@ function decodeTag(
 }
 
 // ──────────────────────────────────────────────────────────
-// Modo escucha continua (receptor) — Reader Mode Android
+// Modo escucha continua (pagador) — Reader Mode Android
 // ──────────────────────────────────────────────────────────
 
 export async function startListeningForTransfer(
@@ -149,7 +150,7 @@ export async function startListeningForTransfer(
   });
 
   await NfcManager.registerTagEvent({
-    alertMessage: 'Acerca el celular emisor para recibir el pago',
+    alertMessage: 'Acerca tu celular al cobrador para leer el cobro',
     invalidateAfterFirstRead: false,
     isReaderModeEnabled: Platform.OS === 'android',
     readerModeFlags:
@@ -203,7 +204,7 @@ export async function readTransferPayload(): Promise<NfcTransferPayload | null> 
 }
 
 // ──────────────────────────────────────────────────────────
-// Emisor — escribe NDEF al acercar celulares / tag NFC
+// Cobrador — escribe NDEF al acercar celulares / tag NFC compatible
 // ──────────────────────────────────────────────────────────
 
 export async function writeTransferPayload(payload: NfcTransferPayload): Promise<void> {
@@ -219,7 +220,7 @@ export async function writeTransferPayload(payload: NfcTransferPayload): Promise
 
   try {
     await NfcManager.requestTechnology(NfcTech.Ndef, {
-      alertMessage: 'Acerca tu celular al receptor para enviar',
+      alertMessage: 'Acerca el celular del pagador para compartir el cobro',
     });
     await NfcManager.ndefHandler.writeNdefMessage(bytes);
   } finally {

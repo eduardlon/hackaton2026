@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Bot, Send, Sparkles } from 'lucide-react-native';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -51,14 +51,41 @@ const INITIAL_MESSAGE: ChatMessage = {
 export default function FinancialAgentScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    voiceTranscript?: string;
+    voiceAnswer?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const seededVoiceRef = useRef(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
   const canSend = input.trim().length > 0 && !loading;
+
+  useEffect(() => {
+    const voiceTranscript = typeof params.voiceTranscript === 'string' ? params.voiceTranscript.trim() : '';
+    const voiceAnswer = typeof params.voiceAnswer === 'string' ? params.voiceAnswer.trim() : '';
+
+    if (seededVoiceRef.current || !voiceTranscript || !voiceAnswer) return;
+    seededVoiceRef.current = true;
+    setMessages([
+      INITIAL_MESSAGE,
+      {
+        id: `voice-user-${Date.now()}`,
+        role: CHAT_ROLE.USER,
+        content: voiceTranscript,
+      },
+      {
+        id: `voice-assistant-${Date.now()}`,
+        role: CHAT_ROLE.ASSISTANT,
+        content: voiceAnswer,
+      },
+    ]);
+    scrollToBottom();
+  }, [params.voiceAnswer, params.voiceTranscript]);
 
   const close = () => {
     if (router.canGoBack()) router.back();

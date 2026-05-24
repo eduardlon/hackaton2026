@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import {
   ArrowDownLeft,
   ArrowLeft,
+  CreditCard,
   CheckCircle2,
   QrCode,
   Radio,
@@ -13,6 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
+  TextInput,
   View,
 } from 'react-native';
 import Animated, {
@@ -28,13 +30,16 @@ import { PressableScale, Text } from '@/components';
 import { confirmNfcTransfer, type NfcTransferPayload } from '@/services/api';
 import {
   cancelNfc,
+  createTransferReference,
   isNfcAvailable,
   startListeningForTransfer,
   stopListeningForTransfer,
+  writeTransferPayload,
 } from '@/services/nfc';
+import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 
-type Mode = 'select' | 'receive' | 'qr';
+type Mode = 'select' | 'receive' | 'pay' | 'qr';
 type Status = 'idle' | 'amount' | 'scanning' | 'success' | 'error';
 
 const COP = (n: number) =>
@@ -44,12 +49,15 @@ export default function NfcTransferScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
 
   const [mode, setMode] = useState<Mode>('select');
   const [status, setStatus] = useState<Status>('idle');
   const [available, setAvailable] = useState<boolean | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [receivedPayload, setReceivedPayload] = useState<NfcTransferPayload | null>(null);
+  const [amountInput, setAmountInput] = useState('10000');
+  const [noteInput, setNoteInput] = useState('Cobro FinGrow');
 
   const cancelRef = useRef(false);
   const stopListenRef = useRef<(() => Promise<void>) | null>(null);
@@ -95,7 +103,7 @@ export default function NfcTransferScreen() {
     transform: [{ scale: 0.7 + ring2.value * 1.2 }],
   }));
 
-  const scanningTitle = 'Recepción NFC habilitada';
+  const scanningTitle = mode === 'pay' ? 'Buscando cobro NFC' : 'Cobro NFC activo';
 
   const close = () => {
     cancelRef.current = true;
@@ -105,9 +113,53 @@ export default function NfcTransferScreen() {
     else router.replace('/(tabs)');
   };
 
-  const startReceive = async () => {
+  const getChargeAmount = () => Number(amountInput.replace(/[^0-9]/g, ''));
+
+  const startCharge = async () => {
+    if (!user?.id) {
+      setStatus('error');
+      setResultMessage('Inicia sesión para crear un cobro NFC.');
+      return;
+    }
+
+    const amount = getChargeAmount();
+    if (!Number.isFinite(amount) || amount < 1000) {
+      setStatus('error');
+      setResultMessage('El cobro mínimo por NFC es $1.000.');
+      return;
+    }
+
     setStatus('scanning');
-    setResultMessage('Permiso activo. Dile al emisor que active NFC y acerque su celular.');
+    setResultMessage('Cobro activo. El pagador debe abrir “Pagar cobro NFC”, acercar su celular y confirmar.');
+    const reference = await createTransferReference();
+    const payload: NfcTransferPayload = {
+      kind: 'fingrow.nfc.charge',
+      receiverUserId: user.id,
+      receiverName: user.name,
+      amount,
+      reference,
+      note: noteInput.trim() || 'Cobro FinGrow',
+      createdAt: new Date().toISOString(),
+    };
+    setReceivedPayload(payload);
+
+    try {
+      await writeTransferPayload(payload);
+      if (cancelRef.current) return;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setStatus('success');
+      setResultMessage(`Cobro NFC de ${COP(amount)} compartido. Cuando el pagador confirme, se descuenta de su billetera y se acredita a la tuya.`);
+    } catch (err) {
+      if (cancelRef.current) return;
+      const msg = err instanceof Error ? err.message : 'No fue posible compartir el cobro NFC';
+      setStatus('error');
+      setResultMessage(msg);
+    }
+  };
+
+  const startPayCharge = async () => {
+    setStatus('scanning');
+    setResultMessage('Acerca tu celular al cobrador para leer la factura NFC. Luego confirmamos el pago desde tu sesión.');
     try {
       stopListenRef.current = await startListeningForTransfer(
         async (payload) => {
@@ -122,8 +174,8 @@ export default function NfcTransferScreen() {
             setStatus('success');
             setResultMessage(
               res.status === 'completed'
-                ? `Recibiste ${COP(payload.amount)} de ${payload.fromName}`
-                : 'Pago recibido — pendiente de confirmación.'
+                ? `Pagaste ${COP(payload.amount)} a ${payload.receiverName}. Se descontó de tu billetera y se acreditó al cobrador.`
+                : 'Pago leído — pendiente de confirmación.'
             );
           } catch (err) {
             if (cancelRef.current) return;
@@ -140,7 +192,7 @@ export default function NfcTransferScreen() {
       );
     } catch (err) {
       if (cancelRef.current) return;
-      const msg = err instanceof Error ? err.message : 'No fue posible leer';
+      const msg = err instanceof Error ? err.message : 'No fue posible leer el cobro NFC';
       setStatus('error');
       setResultMessage(msg);
     }
@@ -220,7 +272,7 @@ export default function NfcTransferScreen() {
         {mode === 'select' ? (
           <View style={{ gap: 12, marginTop: 12 }}>
             <Text variant="body" tone="muted">
-              Cobra por NFC o muestra tu QR. Quien paga usa su billetera como si acercara una tarjeta.
+              Crea una factura NFC para cobrar o lee un cobro NFC para pagar con tu billetera.
             </Text>
 
             <PressableScale
@@ -258,10 +310,51 @@ export default function NfcTransferScreen() {
                   Recibir por NFC
                 </Text>
                 <Text variant="bodySmall" style={{ color: '#0E0F0E', opacity: 0.7 }}>
-                  Activa tu celular como punto de cobro
+                  Crea una factura para cobrar
                 </Text>
               </View>
               <Radio size={22} color="#0E0F0E" strokeWidth={2.2} />
+            </PressableScale>
+
+            <PressableScale
+              onPress={() => {
+                setMode('pay');
+                setStatus('idle');
+                setResultMessage(null);
+              }}
+              haptic="medium"
+              scaleTo={0.98}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 14,
+                padding: 18,
+                borderRadius: theme.radii.xl,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1.5,
+                borderColor: theme.colors.border,
+                ...theme.shadows.sm,
+              }}
+            >
+              <View
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 26,
+                  backgroundColor: theme.colors.primarySoft,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <CreditCard size={26} color={theme.colors.primaryDark} strokeWidth={2.4} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text variant="h3">Pagar cobro NFC</Text>
+                <Text variant="bodySmall" tone="muted">
+                  Lee la factura del cobrador y confirma
+                </Text>
+              </View>
+              <Radio size={22} color={theme.colors.primaryDark} strokeWidth={2.2} />
             </PressableScale>
 
             <PressableScale
@@ -373,9 +466,50 @@ export default function NfcTransferScreen() {
             style={{ marginTop: 12, gap: 18 }}
           >
             <Text variant="body" tone="muted">
-              Activa la recepción solo cuando estés listo para cobrar. Después, quien paga acerca
-              su teléfono como si fuera una tarjeta.
+              Define el valor y activa una factura NFC. El pagador abre la app, lee el cobro,
+              confirma y el dinero se descuenta de su billetera para acreditarse a la tuya.
             </Text>
+
+            <View style={{ gap: 10 }}>
+              <Text variant="micro" tone="muted">Valor a cobrar</Text>
+              <TextInput
+                value={amountInput}
+                onChangeText={setAmountInput}
+                keyboardType="number-pad"
+                placeholder="10000"
+                placeholderTextColor={theme.colors.textSoft}
+                style={{
+                  minHeight: 54,
+                  paddingHorizontal: 14,
+                  borderRadius: theme.radii.lg,
+                  borderWidth: 1.5,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  backgroundColor: theme.colors.surface,
+                  fontFamily: 'Inter_700Bold',
+                  fontSize: 18,
+                }}
+              />
+              <Text variant="micro" tone="muted">Concepto</Text>
+              <TextInput
+                value={noteInput}
+                onChangeText={setNoteInput}
+                placeholder="Factura, venta o servicio"
+                placeholderTextColor={theme.colors.textSoft}
+                maxLength={80}
+                style={{
+                  minHeight: 54,
+                  paddingHorizontal: 14,
+                  borderRadius: theme.radii.lg,
+                  borderWidth: 1.5,
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  backgroundColor: theme.colors.surface,
+                  fontFamily: 'Inter_500Medium',
+                  fontSize: 15,
+                }}
+              />
+            </View>
 
             <View
               style={{
@@ -401,20 +535,20 @@ export default function NfcTransferScreen() {
                   <Radio size={24} color="#0E0F0E" strokeWidth={2.4} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text variant="h3">Permiso del receptor</Text>
+                  <Text variant="h3">Factura NFC lista</Text>
                   <Text variant="bodySmall" tone="muted">
-                    Tu celular quedará listo para recibir el pago.
+                    Cobrarás {COP(getChargeAmount() || 0)} por {noteInput || 'Cobro FinGrow'}.
                   </Text>
                 </View>
               </View>
               <Text variant="micro" tone="muted">
-                No compartimos tu PIN ni token por NFC. Solo se lee una solicitud de pago y se
-                confirma con tu sesión.
+                No compartimos PIN ni token por NFC. Solo compartimos monto, referencia y
+                receptor. El pagador confirma desde su propia sesión.
               </Text>
             </View>
 
             <PressableScale
-              onPress={startReceive}
+              onPress={startCharge}
               haptic="medium"
               scaleTo={0.97}
               style={{
@@ -429,9 +563,89 @@ export default function NfcTransferScreen() {
               }}
             >
               <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 17, color: '#0E0F0E' }}>
-                Permitir recepción NFC
+                Activar factura NFC
               </Text>
               <ArrowDownLeft size={20} color="#0E0F0E" />
+            </PressableScale>
+
+            <PressableScale
+              onPress={resetFlow}
+              haptic="light"
+              style={{
+                alignItems: 'center',
+                paddingVertical: 12,
+                borderRadius: theme.radii.lg,
+                borderWidth: 1.5,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <Text tone="muted">Volver</Text>
+            </PressableScale>
+          </MotiView>
+        ) : null}
+
+        {mode === 'pay' && status === 'idle' ? (
+          <MotiView
+            from={{ opacity: 0, translateY: 12 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: 'timing', duration: 280 }}
+            style={{ marginTop: 12, gap: 18 }}
+          >
+            <Text variant="body" tone="muted">
+              Abre este modo frente al cobrador. Al leer la factura NFC, confirmamos con tu sesión:
+              se descuenta de tu billetera y se acredita al receptor.
+            </Text>
+            <View
+              style={{
+                padding: 18,
+                borderRadius: theme.radii.xl,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1.5,
+                borderColor: theme.colors.primary,
+                gap: 12,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View
+                  style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: 23,
+                    backgroundColor: theme.colors.primarySoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <CreditCard size={24} color={theme.colors.primaryDark} strokeWidth={2.4} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text variant="h3">Pagar factura NFC</Text>
+                  <Text variant="bodySmall" tone="muted">
+                    Acerca tu celular al cobrador para leer el cobro.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <PressableScale
+              onPress={startPayCharge}
+              haptic="medium"
+              scaleTo={0.97}
+              style={{
+                height: 60,
+                borderRadius: theme.radii.xl,
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexDirection: 'row',
+                gap: 10,
+                backgroundColor: theme.colors.primary,
+                ...theme.shadows.sm,
+              }}
+            >
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 17, color: '#0E0F0E' }}>
+                Leer y pagar NFC
+              </Text>
+              <CreditCard size={20} color="#0E0F0E" />
             </PressableScale>
 
             <PressableScale
