@@ -1,68 +1,18 @@
-/**
- * Capa de datos del frontend.
- *
- * Estrategia: cada función intenta primero la edge function de Insforge.
- * Si la function no está desplegada o devuelve error, hace fallback al
- * mock local. Así Expo Go siempre tiene UI mientras el backend se cocina.
- */
-import {
-  mockCredit,
-  mockEvolution,
-  mockExpenseCategories,
-  mockInsights,
-  mockOverview,
-  mockPassport,
-  mockTransactions,
-  mockUpcomingPayments,
-  mockUser,
-  mockWallet,
-} from '@/data/mock';
 import {
   getAccessToken,
   invokeFunction,
-  isInsforgeConfigured,
 } from '@/services/insforge';
 import type {
-  AIInsight,
   Credit,
-  ExpenseCategory,
-  FinancialOverview,
-  MonthlyEvolution,
   Passport,
   SimulatorInput,
   SimulatorResult,
   Transaction,
   TransactionCategory,
   TransactionGroup,
-  UpcomingPayment,
   User,
   Wallet,
 } from '@/types';
-
-// ──────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────
-
-const delay = (ms = 120) => new Promise<void>((res) => setTimeout(res, ms));
-
-/** Envuelve una llamada a Insforge: si falla, log y retorna `fallback`. */
-async function withFallback<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
-  if (!isInsforgeConfigured()) {
-    return fallback;
-  }
-  try {
-    return await fn();
-  } catch (err) {
-    if (__DEV__) {
-      console.warn(`[api:${label}] fallback al mock —`, (err as Error).message);
-    }
-    return fallback;
-  }
-}
-
-// ──────────────────────────────────────────────────────────
-// Tipos del contrato (BACKEND-CONTRACT.md)
-// ──────────────────────────────────────────────────────────
 
 type WalletHomeResponse = {
   user: { id: string; name: string; type: string };
@@ -109,30 +59,7 @@ type PassportResponse = {
   }[];
 };
 
-type SimulateLoanResponse = {
-  requestedAmount: number;
-  termMonths: number;
-  estimatedMonthlyPayment: number;
-  paymentCapacity: number;
-  riskLevel: 'low' | 'medium' | 'high' | string;
-  responsibleAmount: number;
-  recommendation: string;
-  assumptions: string[];
-  suggestedActions: string[];
-};
-
-type RepayCreditResponse = {
-  payment: {
-    id: string;
-    amount: number;
-    paidAt: string;
-    status: string;
-  };
-  wallet: ConfirmBillPaymentResponse['wallet'];
-  activeLoan: NonNullable<Credit['activeLoan']>;
-};
-
-type CreditProfileResponse = {
+export type CreditProfileResponse = {
   availableAmount: number;
   maxAmount: number;
   usedAmount: number;
@@ -142,10 +69,6 @@ type CreditProfileResponse = {
   level: string;
   nextTierAmount: number;
   pointsToNextTier: number;
-};
-
-type CreditStatusResponse = Credit & {
-  mode?: string;
 };
 
 type ObtainCreditResponse = {
@@ -194,29 +117,27 @@ type FinancialChatResponse = {
   disclaimer: string;
 };
 
-type InvoiceExtraction = {
-  provider: string | null;
-  amount: number | null;
-  currency: string;
-  dueDate: string | null;
-  reference: string | null;
-  category: string | null;
-  concept: string | null;
-  documentType: string;
-  confidence: number;
-  requiresReview: boolean;
-  warnings: string[];
-};
-
 export type ProcessInvoiceResponse = {
   documentId: string;
   status: string;
   usedFallback: boolean;
   model: string;
-  extracted: InvoiceExtraction;
+  extracted: {
+    provider: string | null;
+    amount: number | null;
+    currency: string;
+    dueDate: string | null;
+    reference: string | null;
+    category: string | null;
+    concept: string | null;
+    documentType: string;
+    confidence: number;
+    requiresReview: boolean;
+    warnings: string[];
+  };
 };
 
-export type ConfirmBillPaymentResponse = {
+type ConfirmBillPaymentResponse = {
   payment: {
     id: string;
     status: string;
@@ -249,13 +170,6 @@ export type ConfirmBillPaymentResponse = {
   };
 };
 
-export type ProcessInvoiceImageInput = {
-  imageBase64: string;
-  mimeType?: string;
-  fileName?: string | null;
-  source?: 'camera' | 'library';
-};
-
 type RecordFinancialActivityResponse = {
   transaction: {
     id: string;
@@ -270,13 +184,16 @@ type RecordFinancialActivityResponse = {
   wallet: ConfirmBillPaymentResponse['wallet'];
 };
 
-// ──────────────────────────────────────────────────────────
-// Mapeos (contrato → tipos del frontend)
-// ──────────────────────────────────────────────────────────
-
-function levelNumberToLabel(n: number, name: string): string {
-  return `Nivel ${n} — ${name}`;
-}
+type RepayCreditResponse = {
+  payment: {
+    id: string;
+    amount: number;
+    paidAt: string;
+    status: string;
+  };
+  wallet: ConfirmBillPaymentResponse['wallet'];
+  activeLoan: NonNullable<Credit['activeLoan']>;
+};
 
 function categoryFromBackend(type: string): TransactionCategory {
   switch (type) {
@@ -316,8 +233,7 @@ function iconForCategory(cat: TransactionCategory): string {
 function groupForDate(iso: string): TransactionGroup {
   const d = new Date(iso);
   const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return 'hoy';
+  if (d.toDateString() === now.toDateString()) return 'hoy';
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (d.toDateString() === yesterday.toDateString()) return 'ayer';
@@ -329,6 +245,10 @@ function timeFromIso(iso: string): string {
   return d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+let walletHomeCache: ReturnType<typeof mapWalletHome> | null = null;
+let walletHomeCachedAt = 0;
+const CACHE_TTL_MS = 15_000;
+
 function mapWalletHome(res: WalletHomeResponse): {
   user: User;
   wallet: Wallet;
@@ -339,12 +259,12 @@ function mapWalletHome(res: WalletHomeResponse): {
     id: res.user.id,
     name: res.user.name,
     type: res.user.type,
-    level: levelNumberToLabel(res.passport.level, res.passport.levelName),
+    level: `Nivel ${res.passport.level} — ${res.passport.levelName}`,
     levelNumber: res.passport.level,
     points: res.passport.points,
     nextLevelPoints: res.passport.nextLevelPoints,
     verified: true,
-    email: mockUser.email,
+    email: '',
   };
 
   const wallet: Wallet = {
@@ -352,7 +272,7 @@ function mapWalletHome(res: WalletHomeResponse): {
     monthlyIncome: res.wallet.monthlyIncome,
     monthlyExpenses: res.wallet.monthlyExpenses,
     freeMargin: res.wallet.monthlyIncome - res.wallet.monthlyExpenses,
-    sparkline: mockWallet.sparkline,
+    sparkline: [],
   };
 
   const passport: Passport = {
@@ -361,7 +281,7 @@ function mapWalletHome(res: WalletHomeResponse): {
     nextLevel: res.passport.nextLevelPoints,
     progress: res.passport.progressPercentage,
     nextBenefit: res.passport.nextBenefit,
-    monthlyPoints: mockPassport.monthlyPoints,
+    monthlyPoints: 0,
   };
 
   const transactions: Transaction[] = res.recentTransactions.map((t) => {
@@ -383,54 +303,7 @@ function mapWalletHome(res: WalletHomeResponse): {
   return { user, wallet, passport, transactions };
 }
 
-function mapPassport(res: PassportResponse): Passport {
-  return {
-    levelName: res.levelName,
-    points: res.points,
-    nextLevel: res.nextLevelPoints,
-    progress: res.progressPercentage,
-    nextBenefit: res.nextBenefit,
-    monthlyPoints:
-      res.events.reduce((acc, e) => acc + e.pointsDelta, 0) || mockPassport.monthlyPoints,
-  };
-}
-
-function mapSimulatorResponse(res: SimulateLoanResponse): SimulatorResult {
-  const totalPayable = res.estimatedMonthlyPayment * res.termMonths;
-  const paymentCapacityPct = res.paymentCapacity
-    ? Math.min(100, Math.round((res.estimatedMonthlyPayment / res.paymentCapacity) * 100))
-    : 0;
-
-  const capacityLabel: SimulatorResult['capacityLabel'] =
-    res.riskLevel === 'low' ? 'Adecuada' : res.riskLevel === 'high' ? 'Riesgosa' : 'Ajustada';
-
-  const aiRecommendation: SimulatorResult['aiRecommendation'] =
-    res.riskLevel === 'low' ? 'Aprobado' : res.riskLevel === 'high' ? 'No recomendado' : 'Revisar';
-
-  const passportImpactPoints = res.riskLevel === 'low' ? 25 : res.riskLevel === 'high' ? 5 : 15;
-
-  return {
-    monthlyPayment: res.estimatedMonthlyPayment,
-    totalPayable,
-    paymentCapacityPct,
-    capacityLabel,
-    aiRecommendation,
-    aiNote: res.recommendation,
-    passportImpactPoints,
-  };
-}
-
-// ──────────────────────────────────────────────────────────
-// Cache de la respuesta `get-wallet-home`
-// ──────────────────────────────────────────────────────────
-
-let walletHomeCache: ReturnType<typeof mapWalletHome> | null = null;
-let walletHomeCachedAt = 0;
-const CACHE_TTL_MS = 15_000;
-
 function currentUserId(): string | null {
-  // El backend identifica el contexto con el access_token. No usamos un ID
-  // hardcodeado: si no hay token, no llamamos a las functions.
   return getAccessToken() ? 'me' : null;
 }
 
@@ -440,28 +313,11 @@ async function getWalletHome() {
     return walletHomeCache;
   }
 
-  const fallback = {
-    user: mockUser,
-    wallet: mockWallet,
-    passport: mockPassport,
-    transactions: mockTransactions,
-  };
-
   const userId = currentUserId();
-  if (!userId) {
-    walletHomeCache = fallback;
-    walletHomeCachedAt = now;
-    return fallback;
-  }
+  if (!userId) throw new Error('No hay sesión activa');
 
-  const result = await withFallback(
-    'get-wallet-home',
-    async () => {
-      const data = await invokeFunction<WalletHomeResponse>('get-wallet-home', {});
-      return mapWalletHome(data);
-    },
-    fallback
-  );
+  const data = await invokeFunction<WalletHomeResponse>('get-wallet-home', {});
+  const result = mapWalletHome(data);
 
   walletHomeCache = result;
   walletHomeCachedAt = now;
@@ -472,10 +328,6 @@ export function invalidateWalletHomeCache() {
   walletHomeCache = null;
   walletHomeCachedAt = 0;
 }
-
-// ──────────────────────────────────────────────────────────
-// API pública
-// ──────────────────────────────────────────────────────────
 
 export async function getUser(): Promise<User> {
   const home = await getWalletHome();
@@ -491,54 +343,49 @@ export async function getPassport(): Promise<Passport> {
   if (walletHomeCache && Date.now() - walletHomeCachedAt < CACHE_TTL_MS) {
     return walletHomeCache.passport;
   }
-  return withFallback(
-    'get-passport',
-    async () => {
-      const data = await invokeFunction<PassportResponse>('get-passport', {});
-      return mapPassport(data);
-    },
-    mockPassport
-  );
+  const data = await invokeFunction<PassportResponse>('get-passport', {});
+  return {
+    levelName: data.levelName,
+    points: data.points,
+    nextLevel: data.nextLevelPoints,
+    progress: data.progressPercentage,
+    nextBenefit: data.nextBenefit,
+    monthlyPoints: data.events ? data.events.reduce((acc, e) => acc + e.pointsDelta, 0) : 0,
+  };
+}
+
+function mapCreditProfileToCredit(profile: CreditProfileResponse): Credit {
+  return {
+    estimatedAmount: profile.availableAmount,
+    safeMonthlyPayment: profile.safeMonthlyPayment,
+    risk: ['bajo', 'medio-bajo', 'medio', 'medio-alto', 'alto'].includes(String(profile.risk))
+      ? (profile.risk as Credit['risk'])
+      : 'medio-bajo',
+    eligibility: profile.eligibility,
+    potentialAmount: profile.nextTierAmount || profile.maxAmount,
+    level: profile.level,
+    activeLoan: profile.usedAmount > 0
+      ? {
+          id: '',
+          originalAmount: profile.usedAmount,
+          paidAmount: 0,
+          outstandingBalance: profile.usedAmount,
+          progressPercentage: 0,
+          nextPaymentAmount: profile.safeMonthlyPayment,
+          termMonths: 12,
+          status: 'active',
+        }
+      : null,
+  };
 }
 
 export async function getCredit(): Promise<Credit> {
-  return withFallback(
-    'get-credit-status',
-    async () => invokeFunction<CreditStatusResponse>('get-credit-status', {}),
-    mockCredit
-  );
+  const profile = await invokeFunction<CreditProfileResponse>('get-credit-profile', {});
+  return mapCreditProfileToCredit(profile);
 }
 
 export async function getCreditProfile(): Promise<CreditProfileResponse> {
-  return withFallback(
-    'get-credit-status',
-    async () => {
-      const credit = await invokeFunction<CreditStatusResponse>('get-credit-status', {});
-      const usedAmount = credit.activeLoan?.outstandingBalance ?? 0;
-      return {
-        availableAmount: credit.estimatedAmount,
-        maxAmount: Math.max(credit.estimatedAmount + usedAmount, credit.potentialAmount),
-        usedAmount,
-        safeMonthlyPayment: credit.safeMonthlyPayment,
-        risk: credit.risk,
-        eligibility: credit.eligibility,
-        level: credit.level,
-        nextTierAmount: credit.potentialAmount,
-        pointsToNextTier: Math.max(0, mockUser.nextLevelPoints - mockUser.points),
-      };
-    },
-    {
-      availableAmount: mockCredit.estimatedAmount,
-      maxAmount: mockCredit.estimatedAmount,
-      usedAmount: 0,
-      safeMonthlyPayment: mockCredit.safeMonthlyPayment,
-      risk: mockCredit.risk,
-      eligibility: mockCredit.eligibility,
-      level: mockCredit.level,
-      nextTierAmount: mockCredit.potentialAmount,
-      pointsToNextTier: Math.max(0, mockUser.nextLevelPoints - mockUser.points),
-    }
-  );
+  return invokeFunction<CreditProfileResponse>('get-credit-profile', {});
 }
 
 export async function obtainCreditAmount(input: {
@@ -559,42 +406,15 @@ export async function obtainCreditAmount(input: {
 
 export async function getTransactions(): Promise<Transaction[]> {
   const home = await getWalletHome();
-  if (home.transactions.length >= 5) return home.transactions;
-  return [...home.transactions, ...mockTransactions.slice(home.transactions.length)];
+  return home.transactions;
 }
 
-export async function getUpcomingPayments(): Promise<UpcomingPayment[]> {
-  await delay();
-  return mockUpcomingPayments;
-}
-
-export async function getExpenseCategories(): Promise<ExpenseCategory[]> {
-  await delay();
-  return mockExpenseCategories;
-}
-
-export async function getMonthlyEvolution(): Promise<MonthlyEvolution[]> {
-  await delay();
-  return mockEvolution;
-}
-
-export async function getInsights(): Promise<AIInsight[]> {
-  await delay();
-  return mockInsights;
-}
-
-export async function getOverview(): Promise<FinancialOverview> {
-  await delay();
-  return mockOverview;
-}
-
-/** Cálculo local determinístico de cuota — fallback si Insforge no responde. */
-function localSimulateLoan({ amount, months, reason }: SimulatorInput): SimulatorResult {
+function localSimulateLoan({ amount, months }: SimulatorInput): SimulatorResult {
   const rate = 0.02;
   const factor = Math.pow(1 + rate, months);
   const monthlyPayment = Math.round((amount * (rate * factor)) / (factor - 1));
   const totalPayable = monthlyPayment * months;
-  const capacityRatio = monthlyPayment / mockWallet.freeMargin;
+  const capacityRatio = monthlyPayment / ((3200000 - 2100000) || 1100000);
   const paymentCapacityPct = Math.min(100, Math.round(capacityRatio * 100));
 
   let capacityLabel: SimulatorResult['capacityLabel'] = 'Adecuada';
@@ -611,7 +431,6 @@ function localSimulateLoan({ amount, months, reason }: SimulatorInput): Simulato
     aiNote = 'Cuota muy alta para tu flujo';
   }
 
-  void reason;
   const passportImpactPoints =
     aiRecommendation === 'Aprobado' ? 25 : aiRecommendation === 'Revisar' ? 15 : 5;
 
@@ -627,40 +446,18 @@ function localSimulateLoan({ amount, months, reason }: SimulatorInput): Simulato
 }
 
 export async function simulateLoan(input: SimulatorInput): Promise<SimulatorResult> {
-  return withFallback(
-    'simulate-loan',
-    async () => {
-      const data = await invokeFunction<SimulateLoanResponse>('simulate-loan', {
-        requestedAmount: input.amount,
-        termMonths: input.months,
-        purpose: input.reason,
-      });
-      return mapSimulatorResponse(data);
-    },
-    localSimulateLoan(input)
-  );
+  return localSimulateLoan(input);
 }
 
-// ──────────────────────────────────────────────────────────
-// Transferencias NFC
-// ──────────────────────────────────────────────────────────
-
 export type NfcTransferPayload = {
-  /** id del usuario que envía */
   fromUserId: string;
-  /** nombre legible del que envía */
   fromName: string;
-  /** monto en COP */
   amount: number;
-  /** identificador único de la transferencia (idempotencia) */
   reference: string;
-  /** ISO timestamp */
   createdAt: string;
-  /** opcional: nota */
   note?: string;
 };
 
-/** Confirma la recepción NFC contra el backend para mover saldo real. */
 export async function confirmNfcTransfer(
   payload: NfcTransferPayload
 ): Promise<TransferNfcResponse> {
@@ -702,7 +499,7 @@ export async function processInvoiceDemo(): Promise<ProcessInvoiceResponse> {
 }
 
 export async function processInvoiceImage(
-  input: ProcessInvoiceImageInput
+  input: { imageBase64: string; mimeType?: string; fileName?: string | null; source: string }
 ): Promise<ProcessInvoiceResponse> {
   return invokeFunction<ProcessInvoiceResponse>('process-invoice', {
     imageBase64: input.imageBase64,
