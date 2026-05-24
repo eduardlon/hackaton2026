@@ -5,10 +5,11 @@ import {
   clearMemorySession,
   enableBiometricUnlock,
   forgetDevice,
+  getBiometricPhone,
   getStoredPhone,
-  hasBiometricCredentials,
   loginWithPin,
   lookupPhone,
+  normalizePhone,
   readBiometricCredentials,
   registerWithPhone,
   signOutInsforge,
@@ -23,6 +24,7 @@ type AuthState = {
   // hidratación al abrir la app: leer celular almacenado + verificar biometría
   isHydrating: boolean;
   storedPhone: string | null;
+  biometricPhone: string | null;
   hasBiometric: boolean;
 
   error: string | null;
@@ -32,7 +34,7 @@ type AuthState = {
   lookupPhone: (phone: string) => Promise<{ exists: boolean; name?: string }>;
   register: (phone: string, name: string, pin: string, enableBiometric?: boolean) => Promise<void>;
   loginWithPin: (phone: string, pin: string, enableBiometric?: boolean) => Promise<void>;
-  loginWithBiometric: () => Promise<boolean>;
+  loginWithBiometric: (expectedPhone?: string) => Promise<boolean>;
 
   signOut: () => Promise<void>;
   forgetDevice: () => Promise<void>;
@@ -45,6 +47,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   isLoading: false,
   isHydrating: true,
   storedPhone: null,
+  biometricPhone: null,
   hasBiometric: false,
   error: null,
 
@@ -56,12 +59,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   hydrate: async () => {
     if (!get().isHydrating && get().storedPhone !== null) return;
     try {
-      const [phone, biometric] = await Promise.all([
+      const [phone, biometricPhone] = await Promise.all([
         getStoredPhone(),
-        hasBiometricCredentials(),
+        getBiometricPhone(),
       ]);
+      const biometric = Boolean(biometricPhone && (!phone || biometricPhone === phone));
       set({
         storedPhone: phone,
+        biometricPhone,
         hasBiometric: biometric,
         // SIEMPRE no autenticado al arrancar
         user: null,
@@ -95,6 +100,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
         storedPhone: user.phone,
+        biometricPhone: enableBiometricOpt ? user.phone : null,
         hasBiometric: enableBiometricOpt,
       });
     } catch (err) {
@@ -116,7 +122,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
         storedPhone: user.phone,
-        hasBiometric: true,
+        biometricPhone: enableBiometricOpt ? user.phone : null,
+        hasBiometric: enableBiometricOpt,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'PIN incorrecto';
@@ -125,12 +132,19 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     }
   },
 
-  loginWithBiometric: async () => {
+  loginWithBiometric: async (expectedPhone) => {
     set({ isLoading: true, error: null });
     try {
       const creds = await readBiometricCredentials();
       if (!creds) {
         set({ isLoading: false });
+        return false;
+      }
+      if (expectedPhone && creds.phone !== normalizePhone(expectedPhone)) {
+        set({
+          isLoading: false,
+          error: 'La huella guardada pertenece a otro celular. Ingresa tu PIN.',
+        });
         return false;
       }
       const user = await loginWithPin(creds.phone, creds.pin);
@@ -139,6 +153,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
         storedPhone: user.phone,
+        biometricPhone: user.phone,
         hasBiometric: true,
       });
       return true;
@@ -168,6 +183,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       isAuthenticated: false,
       error: null,
       storedPhone: null,
+      biometricPhone: null,
       hasBiometric: false,
     });
   },

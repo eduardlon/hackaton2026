@@ -51,15 +51,15 @@ export default function PerfilScreen() {
   const { theme, toggleMode, mode } = useTheme();
   const router = useRouter();
   const authUser = useAuthStore((s) => s.user);
-  const user = authUser
-    ? {
-        ...mockUser,
-        id: authUser.id,
-        name: authUser.name,
-        type: authUser.type ?? mockUser.type,
-        email: authUser.email ?? mockUser.email,
-      }
-    : mockUser;
+  const user = {
+    id: authUser?.id ?? 'sin-sesion',
+    name: authUser?.name ?? 'Sin sesión activa',
+    phone: authUser?.phone ?? 'Celular no disponible',
+    type: authUser?.type ?? 'Cuenta FinGrow',
+    email: authUser?.email ?? 'Sin correo registrado',
+    level: mockUser.level,
+    points: mockUser.points,
+  };
   const signOut = useAuthStore((s) => s.signOut);
 
   const prefs = usePreferencesStore();
@@ -196,6 +196,9 @@ export default function PerfilScreen() {
             </Text>
             <Text variant="bodySmall" tone="muted">
               {user.type}
+            </Text>
+            <Text variant="micro" tone="soft" numberOfLines={1}>
+              {user.phone}
             </Text>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               <Badge label="Verificado" tone="primary" icon={ShieldCheck} />

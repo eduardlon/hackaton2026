@@ -282,16 +282,15 @@ function ProfileModal({ visible, onClose }: { visible: boolean; onClose: () => v
   const [financialVisible, setFinancialVisible] = useState(false);
   const authUser = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
-  const user = authUser
-    ? {
-        ...mockUser,
-        id: authUser.id,
-        name: authUser.name,
-        phone: authUser.phone,
-        type: authUser.type ?? mockUser.type,
-        email: authUser.email ?? mockUser.email,
-      }
-    : { ...mockUser, phone: 'Celular no disponible' };
+  const user = {
+    id: authUser?.id ?? 'sin-sesion',
+    name: authUser?.name ?? 'Sin sesión activa',
+    phone: authUser?.phone ?? 'Celular no disponible',
+    type: authUser?.type ?? 'Cuenta FinGrow',
+    email: authUser?.email ?? 'Sin correo registrado',
+    level: mockUser.level,
+    points: mockUser.points,
+  };
 
   const handleSignOut = async () => {
     await signOut();

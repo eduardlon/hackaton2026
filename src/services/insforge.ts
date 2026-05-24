@@ -135,6 +135,14 @@ export async function readBiometricCredentials(): Promise<{
   }
 }
 
+export async function getBiometricPhone(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(SECURE_PHONE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export async function clearBiometricCredentials(): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(SECURE_PIN_KEY);
@@ -144,10 +152,12 @@ export async function clearBiometricCredentials(): Promise<void> {
   }
 }
 
-export async function hasBiometricCredentials(): Promise<boolean> {
+export async function hasBiometricCredentials(expectedPhone?: string): Promise<boolean> {
   try {
     const phone = await SecureStore.getItemAsync(SECURE_PHONE_KEY);
-    return Boolean(phone);
+    if (!phone) return false;
+    if (!expectedPhone) return true;
+    return phone === normalizePhone(expectedPhone);
   } catch {
     return false;
   }

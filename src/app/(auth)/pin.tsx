@@ -21,6 +21,7 @@ import {
   PressableScale,
   Text,
 } from '@/components';
+import { normalizePhone } from '@/services/insforge';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 
@@ -39,15 +40,19 @@ export default function PinScreen() {
   const authError = useAuthStore((s) => s.error);
   const clearError = useAuthStore((s) => s.clearError);
   const hasBiometric = useAuthStore((s) => s.hasBiometric);
+  const biometricPhone = useAuthStore((s) => s.biometricPhone);
 
   const fromContinue = params.fromContinue === '1';
   const phone = (params.phone as string) ?? (fromContinue ? storedPhone ?? '' : '');
+  const selectedPhone = phone ? normalizePhone(phone) : '';
   const phoneMasked = phone ? `+57 ${phone.replace(/^\+?57/, '').replace(/^(\d{3})(\d{3})(\d{4}).*/, '$1 $2 $3')}` : '';
+  const biometricMatchesPhone = Boolean(selectedPhone && biometricPhone === selectedPhone);
 
   const [pin, setPin] = useState<string>('');
   const [hasBiometricHw, setHasBiometricHw] = useState(false);
-  const [allowAutoBiometric] = useState(hasBiometric);
+  const [allowAutoBiometric] = useState(() => hasBiometric && biometricMatchesPhone);
   const triedBiometric = useRef(false);
+  const canUseBiometric = hasBiometricHw && hasBiometric && biometricMatchesPhone;
 
   // Si llegaron directo a PIN (sin pasar por Continuar), volver al celular.
   useEffect(() => {
@@ -91,7 +96,7 @@ export default function PinScreen() {
   useEffect(() => {
     if (!fromContinue) return;
     if (triedBiometric.current) return;
-    if (!hasBiometricHw || !allowAutoBiometric) return;
+    if (!hasBiometricHw || !allowAutoBiometric || !biometricMatchesPhone) return;
     triedBiometric.current = true;
     setTimeout(() => {
       promptBiometric();
@@ -150,9 +155,8 @@ export default function PinScreen() {
 
   const promptBiometric = async () => {
     if (isLoading) return;
-    if (!hasBiometricHw) return;
-    if (!hasBiometric) return;
-    const ok = await loginWithBiometric();
+    if (!canUseBiometric) return;
+    const ok = await loginWithBiometric(selectedPhone);
     if (ok) {
       router.replace('/(tabs)');
     }
@@ -345,14 +349,14 @@ export default function PinScreen() {
                         onPress={promptBiometric}
                         haptic="light"
                         scaleTo={0.92}
-                        disabled={!hasBiometricHw || !hasBiometric}
+                        disabled={!canUseBiometric}
                         style={{
                           flex: 1,
                           height: 64,
                           alignItems: 'center',
                           justifyContent: 'center',
                           borderRadius: theme.radii.lg,
-                          opacity: hasBiometricHw && hasBiometric ? 1 : 0.35,
+                          opacity: canUseBiometric ? 1 : 0.35,
                         }}
                         accessibilityLabel="Ingresar con huella"
                       >
