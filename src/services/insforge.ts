@@ -37,8 +37,8 @@ export function getAccessToken(): string | null {
 
 export function getSessionUserId(): string | null {
   if (!accessToken) return null;
-  if (accessToken.startsWith('demo-session-')) {
-    return accessToken.replace('demo-session-', '') || null;
+  if (accessToken.startsWith('phone-session-')) {
+    return accessToken.replace('phone-session-', '') || null;
   }
   const [, payload] = accessToken.split('.');
   if (!payload) return null;

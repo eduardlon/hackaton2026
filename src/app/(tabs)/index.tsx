@@ -29,7 +29,7 @@ export default function HomeScreen() {
   const [credit, setCredit] = useState<Credit | null>(null);
   const [repayMenuVisible, setRepayMenuVisible] = useState(false);
   const [repayLoadingAmount, setRepayLoadingAmount] = useState<number | null>(null);
-  const realtimeUserId = user?.id ?? 'demo-user-001';
+  const realtimeUserId = user?.id;
 
   const activeLoan = credit?.activeLoan?.status === 'active' ? credit.activeLoan : null;
   const repaymentOptions = activeLoan

@@ -10,7 +10,7 @@ import { payBreb } from '@/services/api';
 import { useTheme } from '@/theme';
 import { formatMoney } from '@/utils/format';
 
-const DEFAULT_RECIPIENT = 'Comercio Bre-B Demo';
+const DEFAULT_RECIPIENT = 'Comercio Bre-B';
 
 export default function BrebPaymentScreen() {
   const { theme } = useTheme();
@@ -183,7 +183,7 @@ export default function BrebPaymentScreen() {
           >
             <BadgeCheck size={16} color={theme.colors.primaryDark} />
             <Text variant="micro" style={{ color: theme.colors.primaryDark, flex: 1 }}>
-              Demo sandbox: el pago descuenta tu saldo y se registra como transferencia Bre-B.
+              El pago se procesa contra InsForge y queda asociado a tu sesión actual.
             </Text>
           </View>
         </Card>

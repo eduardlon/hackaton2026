@@ -29,14 +29,8 @@ import {
   Text,
 } from '@/components';
 import { Selector } from '@/components/Selector';
-import {
-  mockEvolution,
-  mockExpenseCategories,
-  mockInsights,
-  mockOverview,
-  mockPassport,
-} from '@/data/mock';
 import { useTheme } from '@/theme';
+import type { AIInsight, ExpenseCategory, FinancialOverview, MonthlyEvolution, Passport } from '@/types';
 import { formatDelta, formatMoney } from '@/utils/format';
 
 const PERIOD_OPTIONS = [
@@ -54,131 +48,67 @@ const INSIGHT_ICONS: Record<string, typeof ShoppingCart> = {
   TrendingUp,
 };
 
+const EMPTY_OVERVIEW: FinancialOverview = {
+  status: 'Atención',
+  income: { value: 0, deltaPct: 0 },
+  expenses: { value: 0, deltaPct: 0 },
+  savings: { value: 0, deltaPct: 0 },
+  netBalance: { value: 0, deltaPct: 0 },
+};
+
+const EMPTY_PASSPORT: Passport = {
+  levelName: 'Inicial',
+  points: 0,
+  nextLevel: 0,
+  progress: 0,
+  nextBenefit: 'Conecta datos financieros reales para activar beneficios',
+  monthlyPoints: 0,
+};
+
 const PERIOD_DATA: Record<Period, {
   label: string;
   compareLabel: string;
-  overview: typeof mockOverview;
-  categories: typeof mockExpenseCategories;
-  evolution: typeof mockEvolution;
-  insights: typeof mockInsights;
-  passport: typeof mockPassport;
+  overview: FinancialOverview;
+  categories: ExpenseCategory[];
+  evolution: MonthlyEvolution[];
+  insights: AIInsight[];
+  passport: Passport;
 }> = {
   mes: {
     label: 'este mes',
     compareLabel: 'vs. mes anterior',
-    overview: mockOverview,
-    categories: mockExpenseCategories,
-    evolution: mockEvolution,
-    insights: mockInsights,
-    passport: mockPassport,
+    overview: EMPTY_OVERVIEW,
+    categories: [],
+    evolution: [],
+    insights: [],
+    passport: EMPTY_PASSPORT,
   },
   anterior: {
     label: 'el mes anterior',
     compareLabel: 'vs. hace 2 meses',
-    overview: {
-      status: 'Estable',
-      income: { value: 2700000, deltaPct: 11 },
-      expenses: { value: 1950000, deltaPct: 6 },
-      savings: { value: 750000, deltaPct: 18 },
-      netBalance: { value: 3720000, deltaPct: 12 },
-    },
-    categories: [
-      { name: 'Servicios', amount: 610000, percentage: 31, color: '#8ED000' },
-      { name: 'Inventario', amount: 520000, percentage: 27, color: '#A7E800' },
-      { name: 'Transporte', amount: 430000, percentage: 22, color: '#C7F25A' },
-      { name: 'Comida', amount: 250000, percentage: 13, color: '#F4A53A' },
-      { name: 'Otros', amount: 140000, percentage: 7, color: '#B8C0CC' },
-    ],
-    evolution: mockEvolution.slice(0, 5),
-    insights: [
-      {
-        id: 'prev-1',
-        title: 'El mes anterior tu ahorro fue menor',
-        description: 'Inventario y transporte dejaron menos margen libre.',
-        icon: 'PiggyBank',
-        trend: 'neutral',
-      },
-      {
-        id: 'prev-2',
-        title: 'Tus ingresos venían creciendo de forma constante',
-        description: 'La tendencia permitió sostener mejor los gastos fijos.',
-        icon: 'TrendingUp',
-        trend: 'up',
-      },
-    ],
-    passport: { ...mockPassport, points: 385, progress: 55, monthlyPoints: 25 },
+    overview: EMPTY_OVERVIEW,
+    categories: [],
+    evolution: [],
+    insights: [],
+    passport: EMPTY_PASSPORT,
   },
   trimestre: {
     label: 'este trimestre',
     compareLabel: 'vs. trimestre anterior',
-    overview: {
-      status: 'Saludable',
-      income: { value: 8600000, deltaPct: 21 },
-      expenses: { value: 5800000, deltaPct: 10 },
-      savings: { value: 2800000, deltaPct: 36 },
-      netBalance: { value: 4362036, deltaPct: 24 },
-    },
-    categories: [
-      { name: 'Inventario', amount: 1780000, percentage: 31, color: '#A7E800' },
-      { name: 'Servicios', amount: 1650000, percentage: 28, color: '#8ED000' },
-      { name: 'Transporte', amount: 1120000, percentage: 19, color: '#C7F25A' },
-      { name: 'Comida', amount: 720000, percentage: 12, color: '#F4A53A' },
-      { name: 'Otros', amount: 530000, percentage: 10, color: '#B8C0CC' },
-    ],
-    evolution: mockEvolution.slice(3),
-    insights: [
-      {
-        id: 'tri-1',
-        title: 'El trimestre muestra crecimiento sano',
-        description: 'Ingresos suben más rápido que gastos, mantén este ritmo.',
-        icon: 'TrendingUp',
-        trend: 'up',
-      },
-      {
-        id: 'tri-2',
-        title: 'Inventario concentra el mayor gasto',
-        description: 'Negocia proveedores para proteger tu margen trimestral.',
-        icon: 'ShoppingCart',
-        trend: 'up',
-      },
-    ],
-    passport: { ...mockPassport, points: 420, progress: 60, monthlyPoints: 80 },
+    overview: EMPTY_OVERVIEW,
+    categories: [],
+    evolution: [],
+    insights: [],
+    passport: EMPTY_PASSPORT,
   },
   anio: {
     label: 'este año',
     compareLabel: 'vs. año anterior',
-    overview: {
-      status: 'Saludable',
-      income: { value: 34400000, deltaPct: 28 },
-      expenses: { value: 22800000, deltaPct: 14 },
-      savings: { value: 11600000, deltaPct: 41 },
-      netBalance: { value: 4362036, deltaPct: 31 },
-    },
-    categories: [
-      { name: 'Inventario', amount: 7200000, percentage: 32, color: '#A7E800' },
-      { name: 'Servicios', amount: 6100000, percentage: 27, color: '#8ED000' },
-      { name: 'Transporte', amount: 4100000, percentage: 18, color: '#C7F25A' },
-      { name: 'Comida', amount: 2900000, percentage: 13, color: '#F4A53A' },
-      { name: 'Otros', amount: 2500000, percentage: 10, color: '#B8C0CC' },
-    ],
-    evolution: mockEvolution,
-    insights: [
-      {
-        id: 'year-1',
-        title: 'Tu historial anual fortalece el acceso a crédito',
-        description: 'La constancia de ingresos mejora tu perfil financiero.',
-        icon: 'TrendingUp',
-        trend: 'up',
-      },
-      {
-        id: 'year-2',
-        title: 'Puedes planear compras grandes con más seguridad',
-        description: 'El ahorro acumulado da margen para invertir sin ahogarte.',
-        icon: 'PiggyBank',
-        trend: 'up',
-      },
-    ],
-    passport: { ...mockPassport, points: 420, progress: 60, monthlyPoints: 210 },
+    overview: EMPTY_OVERVIEW,
+    categories: [],
+    evolution: [],
+    insights: [],
+    passport: EMPTY_PASSPORT,
   },
 };
 
@@ -195,7 +125,7 @@ export default function AnalisisScreen() {
     [analysis.categories]
   );
 
-  const passportPct = Math.round((passport.points / passport.nextLevel) * 100);
+  const passportPct = passport.nextLevel > 0 ? Math.round((passport.points / passport.nextLevel) * 100) : 0;
 
   const screenWidth = Dimensions.get('window').width;
 

@@ -42,7 +42,6 @@ import { getTransactions, getWallet } from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 import type { Transaction, TransactionGroup, Wallet } from '@/types';
-import { mockTransactions, mockWallet } from '@/data/mock';
 import { formatMoney } from '@/utils/format';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -199,8 +198,14 @@ export default function MovimientosScreen() {
   const user = useAuthStore((s) => s.user);
   const [filter, setFilter] = useState<string>('todos');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions);
-  const [wallet, setWallet] = useState<Wallet>(mockWallet);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [wallet, setWallet] = useState<Wallet>({
+    balance: 0,
+    monthlyIncome: 0,
+    monthlyExpenses: 0,
+    freeMargin: 0,
+    sparkline: [],
+  });
 
   const loadMovements = async () => {
     const [nextTransactions, nextWallet] = await Promise.all([getTransactions(), getWallet()]);
@@ -212,7 +217,7 @@ export default function MovimientosScreen() {
     loadMovements();
   }, []);
 
-  useFinancialRealtime(user?.id ?? 'demo-user-001', () => {
+  useFinancialRealtime(user?.id, () => {
     loadMovements();
   });
 

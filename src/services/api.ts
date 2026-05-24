@@ -496,18 +496,6 @@ export async function askFinancialChat(
   return invokeFunction<FinancialChatResponse>('financial-chat', { message, history });
 }
 
-export async function processInvoiceDemo(): Promise<ProcessInvoiceResponse> {
-  return invokeFunction<ProcessInvoiceResponse>('process-invoice', {
-    demoMode: true,
-    provider: 'Afinia',
-    amount: 185400,
-    currency: 'COP',
-    dueDate: '2026-05-28',
-    reference: `AFINIA-DEMO-${Date.now()}`,
-    category: 'Servicios públicos',
-  });
-}
-
 export async function processInvoiceImage(
   input: { imageBase64: string; mimeType?: string; fileName?: string | null; source: string }
 ): Promise<ProcessInvoiceResponse> {

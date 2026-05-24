@@ -18,7 +18,6 @@ import {
 import { type ReactNode, useState } from 'react';
 import { Alert, Modal, View } from 'react-native';
 
-import { mockCredit, mockOverview, mockPassport, mockUser, mockWallet } from '@/data/mock';
 import { canUseNativeNotifications, sendLocalNotification } from '@/services/notifications';
 import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
@@ -202,13 +201,13 @@ function NotificationsModal({ visible, onClose }: { visible: boolean; onClose: (
 
 function FinancialProfileModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { theme } = useTheme();
-  const passportPct = Math.round((mockPassport.points / mockPassport.nextLevel) * 100);
+  const passportPct = 0;
 
   const metrics = [
-    { label: 'Saldo billetera', value: formatMoney(mockWallet.balance), Icon: Wallet, tone: 'primary' as const },
-    { label: 'Ingresos mes', value: formatMoney(mockWallet.monthlyIncome), Icon: TrendingUp, tone: 'success' as const },
-    { label: 'Gastos mes', value: formatMoney(mockWallet.monthlyExpenses), Icon: CreditCard, tone: 'danger' as const },
-    { label: 'Margen libre', value: formatMoney(mockWallet.freeMargin), Icon: PiggyBank, tone: 'primary' as const },
+    { label: 'Saldo billetera', value: formatMoney(0), Icon: Wallet, tone: 'primary' as const },
+    { label: 'Ingresos mes', value: formatMoney(0), Icon: TrendingUp, tone: 'success' as const },
+    { label: 'Gastos mes', value: formatMoney(0), Icon: CreditCard, tone: 'danger' as const },
+    { label: 'Margen libre', value: formatMoney(0), Icon: PiggyBank, tone: 'primary' as const },
   ];
 
   return (
@@ -248,27 +247,27 @@ function FinancialProfileModal({ visible, onClose }: { visible: boolean; onClose
             <Text variant="caption" tone="primary">{passportPct}%</Text>
           </View>
           <Text variant="micro" tone="primary">
-            {mockPassport.points} de {mockPassport.nextLevel} puntos · Nivel {mockPassport.levelName}
+            0 puntos · Nivel Inicial
           </Text>
-          <Text variant="micro" tone="primary">Próximo beneficio: {mockPassport.nextBenefit}</Text>
+          <Text variant="micro" tone="primary">Próximo beneficio: conecta datos financieros reales</Text>
         </View>
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1, padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 4 }}>
             <Text variant="micro" tone="muted">Crédito disponible</Text>
-            <Text variant="bodyStrong" tone="primary">{formatMoney(mockCredit.estimatedAmount)}</Text>
-            <Text variant="micro" tone="muted">Riesgo {mockCredit.risk}</Text>
+            <Text variant="bodyStrong" tone="primary">{formatMoney(0)}</Text>
+            <Text variant="micro" tone="muted">Sin perfil de crédito</Text>
           </View>
           <View style={{ flex: 1, padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt, gap: 4 }}>
             <Text variant="micro" tone="muted">Estado</Text>
-            <Text variant="bodyStrong" tone="success">{mockOverview.status}</Text>
-            <Text variant="micro" tone="muted">Balance +{mockOverview.netBalance.deltaPct}%</Text>
+            <Text variant="bodyStrong" tone="muted">Sin datos</Text>
+            <Text variant="micro" tone="muted">Balance 0%</Text>
           </View>
         </View>
 
         <View style={{ padding: 12, borderRadius: theme.radii.lg, backgroundColor: theme.colors.surfaceAlt }}>
           <Text variant="bodySmall" tone="muted">
-            Recomendación: mantén tu margen libre sobre {formatMoney(900000)} y paga facturas a tiempo para mejorar tu cupo.
+            Recomendación: conecta ingresos, gastos y pagos reales para calcular tu perfil financiero.
           </Text>
         </View>
       </SheetFrame>
@@ -288,8 +287,8 @@ function ProfileModal({ visible, onClose }: { visible: boolean; onClose: () => v
     phone: authUser?.phone ?? 'Celular no disponible',
     type: authUser?.type ?? 'Cuenta FinGrow',
     email: authUser?.email ?? 'Sin correo registrado',
-    level: mockUser.level,
-    points: mockUser.points,
+    level: 'Sin perfil financiero',
+    points: 0,
   };
 
   const handleSignOut = async () => {
@@ -351,7 +350,7 @@ function ProfileModal({ visible, onClose }: { visible: boolean; onClose: () => v
           <View style={{ flex: 1, gap: 4 }}>
             <CreditCard size={18} color={theme.colors.primaryDark} />
             <Text variant="bodyStrong" numberOfLines={1} adjustsFontSizeToFit>
-              {formatMoney(mockCredit.estimatedAmount)}
+              {formatMoney(0)}
             </Text>
             <Text variant="micro" tone="muted">Crédito</Text>
           </View>

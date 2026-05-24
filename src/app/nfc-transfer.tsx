@@ -345,7 +345,7 @@ export default function NfcTransferScreen() {
                 <QrCode size={96} color={theme.colors.text} strokeWidth={2.2} />
               </View>
               <Text variant="micro" tone="muted" align="center" style={{ marginTop: 14 }}>
-                QR demo: alias Laura Martínez · FinGrow
+                QR de transferencia NFC · FinGrow
               </Text>
             </View>
 

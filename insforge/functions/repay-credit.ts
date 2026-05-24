@@ -19,23 +19,6 @@ function extractUserId(request: Request): string | null {
   return auth.replace('Bearer phone-session-', '');
 }
 
-const OTHER_USER = 'f62c395b-f143-4a12-8764-1e406a47b594';
-
-function repayResultFor(userId: string) {
-  if (userId === OTHER_USER) {
-    return {
-      payment: { id: crypto.randomUUID(), amount: 50000, paidAt: new Date().toISOString(), status: 'completed' },
-      wallet: { previousBalance: 1500000, currentBalance: 1450000, currency: 'COP' },
-      activeLoan: null,
-    };
-  }
-  return {
-    payment: { id: crypto.randomUUID(), amount: 100000, paidAt: new Date().toISOString(), status: 'completed' },
-    wallet: { previousBalance: 2500000, currentBalance: 2400000, currency: 'COP' },
-    activeLoan: null,
-  };
-}
-
 export default async function repayCredit(request: Request): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (request.method !== 'POST') return json({ message: 'Method not allowed' }, 405);
@@ -57,5 +40,5 @@ export default async function repayCredit(request: Request): Promise<Response> {
   if (error) return json({ message: error.message }, 500);
   if (!user) return json({ message: 'Usuario no encontrado' }, 404);
 
-  return json(repayResultFor(userId));
+  return json({ message: 'No hay una tabla real de préstamos configurada para este usuario' }, 409);
 }

@@ -19,19 +19,6 @@ function extractUserId(request: Request): string | null {
   return auth.replace('Bearer phone-session-', '');
 }
 
-const OTHER_USER = 'f62c395b-f143-4a12-8764-1e406a47b594';
-
-function creditProfileFor(userId: string) {
-  if (userId === OTHER_USER) {
-    return { availableAmount: 2000000, maxAmount: 3500000, usedAmount: 0, safeMonthlyPayment: 280000, risk: 'medio-bajo', eligibility: 65, level: 'Nivel 2 — Estable', nextTierAmount: 3500000, pointsToNextTier: 220 };
-  }
-  return { availableAmount: 5000000, maxAmount: 8000000, usedAmount: 0, safeMonthlyPayment: 450000, risk: 'bajo', eligibility: 82, level: 'Nivel 3 — Confiable', nextTierAmount: 8000000, pointsToNextTier: 280 };
-}
-
-function walletBalanceFor(userId: string) {
-  return userId === OTHER_USER ? 1500000 : 2500000;
-}
-
 export default async function obtainCredit(request: Request): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (request.method !== 'POST') return json({ message: 'Method not allowed' }, 405);
@@ -60,19 +47,9 @@ export default async function obtainCredit(request: Request): Promise<Response> 
   if (error) return json({ message: error.message }, 500);
   if (!user) return json({ message: 'Usuario no encontrado' }, 404);
 
-  const monthlyPayment = Math.round(amount * 0.02 * Math.pow(1.02, termMonths) / (Math.pow(1.02, termMonths) - 1));
-  const profile = creditProfileFor(userId);
-  const previousBalance = walletBalanceFor(userId);
-  const currentBalance = previousBalance + amount;
+  void amount;
+  void termMonths;
+  void purpose;
 
-  const loanId = crypto.randomUUID();
-  const now = new Date().toISOString();
-
-  const updatedProfile = { ...profile, availableAmount: Math.max(0, profile.availableAmount - amount), usedAmount: (profile.usedAmount || 0) + amount };
-
-  return json({
-    loan: { id: loanId, amount, termMonths, purpose, monthlyPayment, status: 'active', createdAt: now },
-    credit: updatedProfile,
-    wallet: { previousBalance, currentBalance, currency: 'COP' },
-  });
+  return json({ message: 'No hay una tabla real de créditos configurada para este usuario' }, 409);
 }

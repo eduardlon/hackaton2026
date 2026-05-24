@@ -31,7 +31,6 @@ import {
   Switch,
   Text,
 } from '@/components';
-import { mockUser } from '@/data/mock';
 import { useAuthStore } from '@/store/authStore';
 import { usePreferencesStore } from '@/store/preferencesStore';
 import { useTheme } from '@/theme';
@@ -57,8 +56,8 @@ export default function PerfilScreen() {
     phone: authUser?.phone ?? 'Celular no disponible',
     type: authUser?.type ?? 'Cuenta FinGrow',
     email: authUser?.email ?? 'Sin correo registrado',
-    level: mockUser.level,
-    points: mockUser.points,
+    level: 'Sin perfil financiero',
+    points: 0,
   };
   const signOut = useAuthStore((s) => s.signOut);
 

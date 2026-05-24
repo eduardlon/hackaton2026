@@ -114,7 +114,7 @@ export default function CreditoScreen() {
     };
   }, []);
 
-  useFinancialRealtime(user?.id ?? 'demo-user-001', () => {
+  useFinancialRealtime(user?.id, () => {
     loadCreditData();
   });
 
