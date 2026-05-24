@@ -85,12 +85,20 @@ export default function PhoneScreen() {
     }
   };
 
-  const onRegister = () => {
+  const onRegister = async () => {
     if (!canContinue) return;
-    router.push({
-      pathname: '/(auth)/register',
-      params: { phone, fromContinue: '1' },
-    });
+    setLoading(true);
+    try {
+      const result = await lookupPhone(phone);
+      router.push({
+        pathname: result.exists ? '/(auth)/pin' : '/(auth)/register',
+        params: { phone, fromContinue: '1' },
+      });
+    } catch {
+      // El store expone el error en pantalla; evitamos promesas no capturadas en Expo.
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

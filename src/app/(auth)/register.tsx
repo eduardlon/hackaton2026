@@ -34,6 +34,7 @@ export default function RegisterScreen() {
   const fromContinue = params.fromContinue === '1';
 
   const register = useAuthStore((s) => s.register);
+  const lookupPhone = useAuthStore((s) => s.lookupPhone);
   const isLoading = useAuthStore((s) => s.isLoading);
   const authError = useAuthStore((s) => s.error);
   const clearError = useAuthStore((s) => s.clearError);
@@ -43,6 +44,7 @@ export default function RegisterScreen() {
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [checkingExisting, setCheckingExisting] = useState(true);
 
   const nameInputRef = useRef<TextInput>(null);
 
@@ -51,6 +53,29 @@ export default function RegisterScreen() {
       router.replace('/(auth)/phone');
     }
   }, [fromContinue, phone, router]);
+
+  useEffect(() => {
+    if (!fromContinue || !phone.replace(/\D/g, '')) return;
+    let cancelled = false;
+    setCheckingExisting(true);
+    lookupPhone(phone)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.exists) {
+          router.replace({
+            pathname: '/(auth)/pin',
+            params: { phone, fromContinue: '1' },
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setCheckingExisting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromContinue, lookupPhone, phone, router]);
 
   const goBackToPhone = () => {
     if (router.canGoBack()) router.back();
@@ -365,9 +390,9 @@ export default function RegisterScreen() {
                 ...theme.shadows.sm,
               }}
             >
-              {isLoading ? (
-                <ActivityIndicator color="#0E0F0E" />
-              ) : (
+            {isLoading || checkingExisting ? (
+              <ActivityIndicator color="#0E0F0E" />
+            ) : (
                 <>
                   <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 17, color: '#0E0F0E' }}>
                     Continuar
