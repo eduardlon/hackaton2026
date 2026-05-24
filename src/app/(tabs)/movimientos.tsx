@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Building2,
+  CalendarClock,
   ChevronRight,
   CircleEqual,
   FileText,
@@ -18,9 +19,11 @@ import {
   ShoppingCart,
   Sparkles,
   Star,
+  Tag,
+  X,
 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Modal, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -63,11 +66,135 @@ const GROUP_LABEL: Record<TransactionGroup, string> = {
   semana: 'Esta semana',
 };
 
+function MovementDetailModal({
+  transaction,
+  onClose,
+}: {
+  transaction: Transaction | null;
+  onClose: () => void;
+}) {
+  const { theme } = useTheme();
+  if (!transaction) return null;
+
+  const Icon = ICONS[transaction.icon] ?? Sparkles;
+  const isIncome = transaction.amount > 0;
+  const movementLabel = isIncome ? 'Ingreso' : 'Salida';
+  const detailDate = transaction.date ? `${transaction.date} a las ${transaction.time}` : `Hoy a las ${transaction.time}`;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: 'flex-end',
+          backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        }}
+      >
+        <View
+          style={{
+            margin: 16,
+            padding: 18,
+            borderRadius: theme.radii.xxl,
+            backgroundColor: theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.borderSoft,
+            gap: 16,
+            ...theme.shadows.lg,
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="h3">Detalle del movimiento</Text>
+            <PressableScale
+              onPress={onClose}
+              haptic="light"
+              scaleTo={0.9}
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: theme.colors.surfaceAlt,
+              }}
+            >
+              <X size={16} color={theme.colors.textMuted} />
+            </PressableScale>
+          </View>
+
+          <View style={{ alignItems: 'center', gap: 10 }}>
+            <IconCircle Icon={Icon} tone={isIncome ? 'success' : 'neutral'} size={58} />
+            <View style={{ alignItems: 'center', gap: 4 }}>
+              <Text variant="h2" align="center">
+                {transaction.title}
+              </Text>
+              {transaction.subtitle ? (
+                <Text variant="bodySmall" tone="muted" align="center">
+                  {transaction.subtitle}
+                </Text>
+              ) : null}
+              <Text variant="display" tone={isIncome ? 'income' : 'expense'}>
+                {formatMoney(transaction.amount, { sign: true })}
+              </Text>
+            </View>
+          </View>
+
+          <View style={{ gap: 10 }}>
+            {[
+              { label: 'Tipo', value: movementLabel, Icon: isIncome ? ArrowUpRight : ArrowDownRight },
+              { label: 'Categoría', value: transaction.category, Icon: Tag },
+              { label: 'Fecha', value: detailDate, Icon: CalendarClock },
+              { label: 'Puntos', value: transaction.points > 0 ? `+${transaction.points}` : 'No suma puntos', Icon: Star },
+            ].map((item) => {
+              const RowIcon = item.Icon;
+              return (
+                <View
+                  key={item.label}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: 12,
+                    borderRadius: theme.radii.lg,
+                    backgroundColor: theme.colors.surfaceAlt,
+                  }}
+                >
+                  <RowIcon size={16} color={theme.colors.primaryDark} />
+                  <Text variant="micro" tone="muted" style={{ width: 68 }}>
+                    {item.label}
+                  </Text>
+                  <Text variant="bodyStrong" style={{ flex: 1 }} numberOfLines={1}>
+                    {item.value}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          <View
+            style={{
+              padding: 12,
+              borderRadius: theme.radii.lg,
+              backgroundColor: theme.colors.primarySoft,
+            }}
+          >
+            <Text variant="bodySmall" tone="primary">
+              {transaction.points > 0
+                ? 'Este movimiento fortalece tu Pasaporte Financiero y ayuda a construir historial.'
+                : 'Este movimiento queda registrado para entender mejor tu flujo y capacidad financiera.'}
+            </Text>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function MovimientosScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<string>('todos');
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
 
   const filtered = useMemo(() => {
     if (filter === 'todos') return mockTransactions;
@@ -92,6 +219,10 @@ export default function MovimientosScreen() {
 
   return (
     <ScreenContainer scroll hasTabBar>
+      <MovementDetailModal
+        transaction={selectedTransaction}
+        onClose={() => setSelectedTransaction(null)}
+      />
       {/* Header */}
       <View
         style={{
@@ -209,6 +340,7 @@ export default function MovimientosScreen() {
                     return (
                       <PressableScale
                         key={tx.id}
+                        onPress={() => setSelectedTransaction(tx)}
                         scaleTo={0.98}
                         haptic="selection"
                         style={{

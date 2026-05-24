@@ -1,25 +1,28 @@
 import * as Haptics from 'expo-haptics';
-import { CoinsIcon, Home, LineChart, User, ArrowLeftRight } from 'lucide-react-native';
-import { useEffect } from 'react';
-import { View } from 'react-native';
+import { ArrowLeftRight, Bot, CoinsIcon, Home, LineChart, Mic, Sparkles, X } from 'lucide-react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Modal, View } from 'react-native';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { askFinancialChat } from '@/services/api';
+import { useTheme } from '@/theme';
+
 import { PressableScale } from './PressableScale';
 import { Text } from './Text';
-import { useTheme } from '@/theme';
 
 const ICON_MAP: Record<string, typeof Home> = {
   index: Home,
   movimientos: ArrowLeftRight,
   credito: CoinsIcon,
   analisis: LineChart,
-  perfil: User,
 };
 
 const LABEL_MAP: Record<string, string> = {
@@ -27,8 +30,202 @@ const LABEL_MAP: Record<string, string> = {
   movimientos: 'Movimientos',
   credito: 'Crédito',
   analisis: 'Análisis',
-  perfil: 'Perfil',
 };
+
+const QUICK_AI_PROMPT =
+  'Dame una recomendación financiera corta, concreta y accionable para hoy según mi estado financiero.';
+
+function QuickAIModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { theme } = useTheme();
+  const [status, setStatus] = useState<'listening' | 'thinking' | 'answer'>('listening');
+  const [answer, setAnswer] = useState('');
+  const pulse = useSharedValue(0);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    setStatus('listening');
+    setAnswer('');
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 1300, easing: Easing.out(Easing.cubic) }),
+      -1,
+      false
+    );
+
+    const timeout = setTimeout(() => {
+      setStatus('thinking');
+      askFinancialChat(QUICK_AI_PROMPT)
+        .then((res) => {
+          const text =
+            res.answer ||
+            'Hoy mantén tu margen libre protegido, prioriza pagos próximos y evita asumir cuotas nuevas si reducen tu flujo.';
+          setAnswer(text);
+          setStatus('answer');
+        })
+        .catch(() => {
+          const fallback =
+            'Hoy cuida tu flujo: paga primero lo que vence pronto, registra tus ingresos y evita gastos que reduzcan tu margen disponible.';
+          setAnswer(fallback);
+          setStatus('answer');
+        });
+    }, 1100);
+
+    return () => {
+      clearTimeout(timeout);
+      pulse.value = 0;
+    };
+  }, [pulse, visible]);
+
+  const ringStyle = useAnimatedStyle(() => ({
+    opacity: 1 - pulse.value,
+    transform: [{ scale: 0.75 + pulse.value * 1.2 }],
+  }));
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: 'flex-end',
+          backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        }}
+      >
+        <View
+          style={{
+            margin: 16,
+            padding: 20,
+            borderRadius: theme.radii.xxl,
+            backgroundColor: theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.borderSoft,
+            gap: 18,
+            ...theme.shadows.lg,
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.primarySoft,
+                }}
+              >
+                <Sparkles size={18} color={theme.colors.primaryDark} />
+              </View>
+              <View>
+                <Text variant="h3">Asistente IA</Text>
+                <Text variant="micro" tone="muted">
+                  Respuesta rápida para tu día
+                </Text>
+              </View>
+            </View>
+            <PressableScale
+              onPress={onClose}
+              haptic="light"
+              scaleTo={0.9}
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: theme.colors.surfaceAlt,
+              }}
+            >
+              <X size={16} color={theme.colors.textMuted} />
+            </PressableScale>
+          </View>
+
+          <View style={{ alignItems: 'center', gap: 14, paddingVertical: 6 }}>
+            <View style={{ width: 112, height: 112, alignItems: 'center', justifyContent: 'center' }}>
+              <Animated.View
+                style={[
+                  {
+                    position: 'absolute',
+                    width: 96,
+                    height: 96,
+                    borderRadius: 48,
+                    backgroundColor: theme.colors.primarySoft,
+                  },
+                  ringStyle,
+                ]}
+              />
+              <View
+                style={{
+                  width: 76,
+                  height: 76,
+                  borderRadius: 38,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.primary,
+                  ...theme.shadows.md,
+                }}
+              >
+                {status === 'thinking' ? (
+                  <ActivityIndicator color={theme.colors.primaryContrast} />
+                ) : (
+                  <Mic size={30} color={theme.colors.primaryContrast} strokeWidth={2.4} />
+                )}
+              </View>
+            </View>
+
+            <Text variant="h2" align="center">
+              {status === 'listening'
+                ? 'Te estoy escuchando...'
+                : status === 'thinking'
+                  ? 'Analizando tu contexto...'
+                  : 'Esto te recomiendo'}
+            </Text>
+            <Text variant="bodySmall" tone="muted" align="center">
+              {status === 'answer'
+                ? answer
+                : 'Mantén presionado el botón inteligente para abrir una recomendación inmediata en texto.'}
+            </Text>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function QuickAIButton({ onLongPress }: { onLongPress: () => void }) {
+  const { theme } = useTheme();
+
+  return (
+    <PressableScale
+      onLongPress={onLongPress}
+      delayLongPress={280}
+      haptic="none"
+      scaleTo={0.9}
+      style={{
+        width: 76,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: -18,
+      }}
+    >
+      <View
+        style={{
+          width: 66,
+          height: 54,
+          borderRadius: 22,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: theme.colors.primary,
+          borderWidth: 4,
+          borderColor: theme.colors.bg,
+          ...theme.shadows.lg,
+        }}
+      >
+        <Bot size={28} color={theme.colors.primaryContrast} strokeWidth={2.5} />
+      </View>
+    </PressableScale>
+  );
+}
 
 function TabItem({
   isFocused,
@@ -114,50 +311,64 @@ export type AppTabBarProps = {
 export function BottomTabBar({ state, navigation }: AppTabBarProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const [aiVisible, setAiVisible] = useState(false);
+  const visibleRoutes = useMemo(
+    () => state.routes.filter((route) => route.name !== 'perfil'),
+    [state.routes]
+  );
+
+  const openAI = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setAiVisible(true);
+  };
+
+  const renderTab = (route: { key: string; name: string }) => {
+    const routeIndex = state.routes.findIndex((item) => item.key === route.key);
+    const isFocused = state.index === routeIndex;
+    const onPress = () => {
+      Haptics.selectionAsync().catch(() => {});
+      const event = navigation.emit({
+        type: 'tabPress',
+        target: route.key,
+        canPreventDefault: true,
+      });
+      if (!isFocused && !event.defaultPrevented) {
+        navigation.navigate(route.name);
+      }
+    };
+    return (
+      <TabItem
+        key={route.key}
+        isFocused={isFocused}
+        routeName={route.name}
+        onPress={onPress}
+      />
+    );
+  };
 
   return (
-    <View
-      style={{
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        paddingBottom: Math.max(insets.bottom, 10),
-        paddingTop: 6,
-        paddingHorizontal: 12,
-        backgroundColor: theme.colors.bg,
-        borderTopWidth: 1,
-        borderTopColor: theme.colors.borderSoft,
-      }}
-    >
+    <View pointerEvents="box-none" style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+      <QuickAIModal visible={aiVisible} onClose={() => setAiVisible(false)} />
       <View
         style={{
-          flexDirection: 'row',
-          alignItems: 'center',
+          paddingBottom: Math.max(insets.bottom, 10),
+          paddingTop: 6,
+          paddingHorizontal: 12,
+          backgroundColor: theme.colors.bg,
+          borderTopWidth: 1,
+          borderTopColor: theme.colors.borderSoft,
         }}
       >
-        {state.routes.map((route, index) => {
-          const isFocused = state.index === index;
-          const onPress = () => {
-            Haptics.selectionAsync().catch(() => {});
-            const event = navigation.emit({
-              type: 'tabPress',
-              target: route.key,
-              canPreventDefault: true,
-            });
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name);
-            }
-          };
-          return (
-            <TabItem
-              key={route.key}
-              isFocused={isFocused}
-              routeName={route.name}
-              onPress={onPress}
-            />
-          );
-        })}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+          }}
+        >
+          {visibleRoutes.slice(0, 2).map(renderTab)}
+          <QuickAIButton onLongPress={openAI} />
+          {visibleRoutes.slice(2).map(renderTab)}
+        </View>
       </View>
     </View>
   );
