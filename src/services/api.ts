@@ -121,6 +121,19 @@ type SimulateLoanResponse = {
   suggestedActions: string[];
 };
 
+type CreditStatusResponse = Credit;
+
+type RepayCreditResponse = {
+  payment: {
+    id: string;
+    amount: number;
+    paidAt: string;
+    status: string;
+  };
+  wallet: ConfirmBillPaymentResponse['wallet'];
+  activeLoan: NonNullable<Credit['activeLoan']>;
+};
+
 type TransferNfcResponse = {
   transferId: string;
   status: 'completed' | 'pending' | string;
@@ -442,14 +455,21 @@ export async function getPassport(): Promise<Passport> {
   );
 }
 
-export async function getCredit(): Promise<Credit> {
-  await delay();
+function getLocalCredit(): Credit {
   const remaining = Math.max(0, mockCredit.estimatedAmount - localCreditUsed);
   return {
     ...mockCredit,
     estimatedAmount: remaining,
     potentialAmount: Math.max(remaining, mockCredit.potentialAmount - localCreditUsed),
   };
+}
+
+export async function getCredit(): Promise<Credit> {
+  return withFallback(
+    'get-credit-status',
+    async () => invokeFunction<CreditStatusResponse>('get-credit-status', {}),
+    getLocalCredit()
+  );
 }
 
 export function obtainCreditAmount(amount: number) {
@@ -629,6 +649,12 @@ export async function recordFinancialActivity(input: {
   description: string;
 }): Promise<RecordFinancialActivityResponse> {
   const result = await invokeFunction<RecordFinancialActivityResponse>('record-financial-activity', input);
+  invalidateWalletHomeCache();
+  return result;
+}
+
+export async function repayCredit(amount: number): Promise<RepayCreditResponse> {
+  const result = await invokeFunction<RepayCreditResponse>('repay-credit', { amount });
   invalidateWalletHomeCache();
   return result;
 }

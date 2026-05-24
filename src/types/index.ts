@@ -26,6 +26,20 @@ export type Credit = {
   eligibility: number; // 0-100
   potentialAmount: number;
   level: string;
+  activeLoan?: ActiveLoan | null;
+};
+
+export type ActiveLoan = {
+  id: string;
+  originalAmount: number;
+  paidAmount: number;
+  outstandingBalance: number;
+  progressPercentage: number;
+  nextPaymentAmount: number;
+  termMonths: number;
+  status: 'active' | 'paid' | string;
+  disbursedAt?: string;
+  updatedAt?: string;
 };
 
 export type Passport = {

@@ -22,7 +22,7 @@ import {
   Tag,
   X,
 } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -37,8 +37,11 @@ import {
   StaggeredList,
   Text,
 } from '@/components';
+import { useFinancialRealtime } from '@/hooks/useFinancialRealtime';
+import { getTransactions, getWallet } from '@/services/api';
+import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
-import type { Transaction, TransactionGroup } from '@/types';
+import type { Transaction, TransactionGroup, Wallet } from '@/types';
 import { mockTransactions, mockWallet } from '@/data/mock';
 import { formatMoney } from '@/utils/format';
 
@@ -193,17 +196,34 @@ export default function MovimientosScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((s) => s.user);
   const [filter, setFilter] = useState<string>('todos');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions);
+  const [wallet, setWallet] = useState<Wallet>(mockWallet);
+
+  const loadMovements = async () => {
+    const [nextTransactions, nextWallet] = await Promise.all([getTransactions(), getWallet()]);
+    setTransactions(nextTransactions);
+    setWallet(nextWallet);
+  };
+
+  useEffect(() => {
+    loadMovements();
+  }, []);
+
+  useFinancialRealtime(user?.id ?? 'demo-user-001', () => {
+    loadMovements();
+  });
 
   const filtered = useMemo(() => {
-    if (filter === 'todos') return mockTransactions;
+    if (filter === 'todos') return transactions;
     if (filter === 'Ingreso')
-      return mockTransactions.filter((t) => t.amount > 0 || t.category === 'Ingreso');
+      return transactions.filter((t) => t.amount > 0 || t.category === 'Ingreso');
     if (filter === 'Gasto')
-      return mockTransactions.filter((t) => t.amount < 0 && t.category !== 'Factura');
-    return mockTransactions.filter((t) => t.category === filter);
-  }, [filter]);
+      return transactions.filter((t) => t.amount < 0 && t.category !== 'Factura');
+    return transactions.filter((t) => t.category === filter);
+  }, [filter, transactions]);
 
   const grouped = useMemo(() => {
     const groups: Record<TransactionGroup, Transaction[]> = {
@@ -288,21 +308,21 @@ export default function MovimientosScreen() {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <MetricCell
             label="Ingresos del mes"
-            value={formatMoney(mockWallet.monthlyIncome)}
+            value={formatMoney(wallet.monthlyIncome)}
             Icon={ArrowUpRight}
             tone="success"
             style={{ flex: 1 }}
           />
           <MetricCell
             label="Gastos del mes"
-            value={formatMoney(mockWallet.monthlyExpenses)}
+            value={formatMoney(wallet.monthlyExpenses)}
             Icon={ArrowDownRight}
             tone="danger"
             style={{ flex: 1 }}
           />
           <MetricCell
             label="Balance neto"
-            value={formatMoney(mockWallet.freeMargin)}
+            value={formatMoney(wallet.freeMargin)}
             Icon={CircleEqual}
             tone="primary"
             style={{ flex: 1 }}

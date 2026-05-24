@@ -1,8 +1,21 @@
 import * as Haptics from 'expo-haptics';
 import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
-import { ArrowLeftRight, CoinsIcon, Home, LineChart, Mic, Sparkles, X } from 'lucide-react-native';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, View } from 'react-native';
+import { router } from 'expo-router';
+import {
+  ArrowDownLeft,
+  ArrowLeftRight,
+  Brain,
+  Camera,
+  CoinsIcon,
+  Home,
+  LineChart,
+  Mic,
+  Send,
+  Sparkles,
+  X,
+} from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, Pressable, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -14,7 +27,12 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
-import { askFinancialChat } from '@/services/api';
+import {
+  askFinancialChat,
+  confirmBillPaymentFromInvoice,
+  processInvoiceDemo,
+  recordFinancialActivity,
+} from '@/services/api';
 import { useTheme } from '@/theme';
 
 import { PressableScale } from './PressableScale';
@@ -36,6 +54,49 @@ const LABEL_MAP: Record<string, string> = {
 
 const QUICK_AI_PROMPT =
   'Dame una recomendación financiera corta, concreta y accionable para hoy según mi estado financiero.';
+
+const QUICK_ACTION = {
+  TRANSFER: 'transfer',
+  RECEIVE: 'receive',
+  PAY_PHOTO: 'pay_photo',
+  ASK_AI: 'ask_ai',
+} as const;
+
+type QuickActionKey = (typeof QUICK_ACTION)[keyof typeof QUICK_ACTION];
+
+type QuickMenuAction = {
+  key: QuickActionKey;
+  label: string;
+  helper: string;
+  Icon: typeof Home;
+};
+
+const QUICK_MENU_ACTIONS: QuickMenuAction[] = [
+  {
+    key: QUICK_ACTION.TRANSFER,
+    label: 'Transferir',
+    helper: 'Enviar por NFC',
+    Icon: Send,
+  },
+  {
+    key: QUICK_ACTION.RECEIVE,
+    label: 'Recibir',
+    helper: 'Entrada demo',
+    Icon: ArrowDownLeft,
+  },
+  {
+    key: QUICK_ACTION.PAY_PHOTO,
+    label: 'Pagar foto',
+    helper: 'Factura IA',
+    Icon: Camera,
+  },
+  {
+    key: QUICK_ACTION.ASK_AI,
+    label: 'Preguntar IA',
+    helper: 'Consejo rápido',
+    Icon: Brain,
+  },
+];
 
 function QuickAIModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { theme } = useTheme();
@@ -194,11 +255,131 @@ function QuickAIModal({ visible, onClose }: { visible: boolean; onClose: () => v
   );
 }
 
-function QuickAIButton({ onLongPress }: { onLongPress: () => void }) {
+function QuickActionMenu({
+  visible,
+  bottomOffset,
+  loadingKey,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  bottomOffset: number;
+  loadingKey: QuickActionKey | null;
+  onClose: () => void;
+  onSelect: (key: QuickActionKey) => void;
+}) {
+  const { theme } = useTheme();
+
+  if (!visible) return null;
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: bottomOffset,
+        alignItems: 'center',
+      }}
+    >
+      <Pressable
+        onPress={onClose}
+        accessibilityLabel="Cerrar menú de acciones"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: -bottomOffset,
+          height: 420,
+        }}
+      />
+      <View
+        style={{
+          width: '92%',
+          maxWidth: 420,
+          paddingVertical: 12,
+          paddingHorizontal: 12,
+          borderRadius: 28,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.borderSoft,
+          shadowColor: '#000',
+          shadowOpacity: theme.mode === 'dark' ? 0.35 : 0.16,
+          shadowRadius: 20,
+          shadowOffset: { width: 0, height: 10 },
+          elevation: 14,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          {QUICK_MENU_ACTIONS.map(({ key, label, helper, Icon }) => {
+            const isLoading = loadingKey === key;
+            return (
+              <PressableScale
+                key={key}
+                disabled={Boolean(loadingKey)}
+                onPress={() => onSelect(key)}
+                haptic="light"
+                scaleTo={0.92}
+                accessibilityLabel={label}
+                style={{
+                  flex: 1,
+                  minHeight: 86,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  opacity: loadingKey && !isLoading ? 0.46 : 1,
+                }}
+              >
+                <View
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 18,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: isLoading ? theme.colors.primary : theme.colors.primarySoft,
+                    borderWidth: 1,
+                    borderColor: theme.colors.borderSoft,
+                  }}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color={theme.colors.primaryContrast} />
+                  ) : (
+                    <Icon size={22} color={theme.colors.primaryDark} strokeWidth={2.35} />
+                  )}
+                </View>
+                <View style={{ alignItems: 'center', gap: 1 }}>
+                  <Text variant="caption" align="center" numberOfLines={1}>
+                    {label}
+                  </Text>
+                  <Text variant="micro" tone="muted" align="center" numberOfLines={1}>
+                    {helper}
+                  </Text>
+                </View>
+              </PressableScale>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function QuickAIButton({
+  isOpen,
+  onPress,
+  onLongPress,
+}: {
+  isOpen: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
   const { theme } = useTheme();
 
   return (
     <PressableScale
+      onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={280}
       haptic="none"
@@ -260,6 +441,21 @@ function QuickAIButton({ onLongPress }: { onLongPress: () => void }) {
           <Rect x="25" y="30" width="9" height="18" rx="4" fill="url(#aiIconDepth)" />
           <Rect x="37" y="23" width="9" height="25" rx="4" fill="url(#aiIconDepth)" />
         </Svg>
+        {isOpen ? (
+          <View
+            style={{
+              position: 'absolute',
+              width: 24,
+              height: 24,
+              borderRadius: 12,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: theme.colors.bg,
+            }}
+          >
+            <X size={15} color={theme.colors.text} strokeWidth={2.6} />
+          </View>
+        ) : null}
       </ExpoLinearGradient>
     </PressableScale>
   );
@@ -350,14 +546,89 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const [aiVisible, setAiVisible] = useState(false);
-  const visibleRoutes = useMemo(
-    () => state.routes.filter((route) => route.name !== 'perfil'),
-    [state.routes]
-  );
+  const [quickMenuVisible, setQuickMenuVisible] = useState(false);
+  const [quickActionLoading, setQuickActionLoading] = useState<QuickActionKey | null>(null);
+  const visibleRoutes = state.routes.filter((route) => route.name !== 'perfil');
+  const quickMenuBottomOffset = Math.max(insets.bottom, 10) + 72;
 
   const openAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setQuickMenuVisible(false);
     setAiVisible(true);
+  };
+
+  const runQuickTask = async (key: QuickActionKey, task: () => Promise<void>) => {
+    if (quickActionLoading) return;
+    setQuickActionLoading(key);
+    try {
+      await task();
+    } catch (error) {
+      Alert.alert(
+        'No pudimos completar la acción',
+        error instanceof Error ? error.message : 'Intenta de nuevo.'
+      );
+    } finally {
+      setQuickActionLoading(null);
+    }
+  };
+
+  const handleReceiveMoney = () => {
+    runQuickTask(QUICK_ACTION.RECEIVE, async () => {
+      const result = await recordFinancialActivity({
+        type: 'income',
+        amount: 300000,
+        category: 'Transferencias',
+        description: 'Dinero recibido desde menú rápido',
+      });
+      setQuickMenuVisible(false);
+      Alert.alert('Dinero recibido', `Tu Pasaporte sumó +${result.passportUpdate.pointsAdded} puntos.`);
+    });
+  };
+
+  const handlePayWithPhoto = () => {
+    runQuickTask(QUICK_ACTION.PAY_PHOTO, async () => {
+      const invoice = await processInvoiceDemo();
+      const { extracted } = invoice;
+      Alert.alert(
+        'Factura detectada',
+        `${extracted.provider ?? 'Proveedor'}\nValor: $${(extracted.amount ?? 0).toLocaleString('es-CO')}\nReferencia: ${extracted.reference ?? 'requiere revisión'}`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Pagar',
+            onPress: () => {
+              runQuickTask(QUICK_ACTION.PAY_PHOTO, async () => {
+                const result = await confirmBillPaymentFromInvoice(invoice);
+                setQuickMenuVisible(false);
+                Alert.alert(
+                  'Pago exitoso',
+                  `Pagaste ${result.payment.provider} y tu Pasaporte sumó +${result.passportUpdate.pointsAdded} puntos.`
+                );
+              });
+            },
+          },
+        ]
+      );
+    });
+  };
+
+  const handleQuickMenuSelect = (key: QuickActionKey) => {
+    if (key === QUICK_ACTION.TRANSFER) {
+      setQuickMenuVisible(false);
+      router.push('/nfc-transfer');
+      return;
+    }
+    if (key === QUICK_ACTION.RECEIVE) {
+      handleReceiveMoney();
+      return;
+    }
+    if (key === QUICK_ACTION.PAY_PHOTO) {
+      handlePayWithPhoto();
+      return;
+    }
+    if (key === QUICK_ACTION.ASK_AI) {
+      openAI();
+    }
   };
 
   const renderTab = (route: { key: string; name: string }) => {
@@ -365,6 +636,7 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
     const isFocused = state.index === routeIndex;
     const onPress = () => {
       Haptics.selectionAsync().catch(() => {});
+      setQuickMenuVisible(false);
       const event = navigation.emit({
         type: 'tabPress',
         target: route.key,
@@ -387,6 +659,13 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
       <QuickAIModal visible={aiVisible} onClose={() => setAiVisible(false)} />
+      <QuickActionMenu
+        visible={quickMenuVisible}
+        bottomOffset={quickMenuBottomOffset}
+        loadingKey={quickActionLoading}
+        onClose={() => setQuickMenuVisible(false)}
+        onSelect={handleQuickMenuSelect}
+      />
       <View
         style={{
           paddingBottom: Math.max(insets.bottom, 10),
@@ -404,7 +683,14 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
           }}
         >
           {visibleRoutes.slice(0, 2).map(renderTab)}
-          <QuickAIButton onLongPress={openAI} />
+          <QuickAIButton
+            isOpen={quickMenuVisible}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setQuickMenuVisible((current) => !current);
+            }}
+            onLongPress={openAI}
+          />
           {visibleRoutes.slice(2).map(renderTab)}
         </View>
       </View>

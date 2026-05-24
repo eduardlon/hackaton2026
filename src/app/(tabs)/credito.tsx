@@ -29,7 +29,9 @@ import {
   Text,
 } from '@/components';
 import { Selector } from '@/components/Selector';
+import { useFinancialRealtime } from '@/hooks/useFinancialRealtime';
 import { getCredit, getWallet, obtainCreditAmount, simulateLoan } from '@/services/api';
+import { useAuthStore } from '@/store/authStore';
 import { useTheme } from '@/theme';
 import type { Credit, SimulatorResult, Wallet } from '@/types';
 import { formatMoney, formatPercent } from '@/utils/format';
@@ -57,6 +59,7 @@ const MIN_AMOUNT = 100000;
 
 export default function CreditoScreen() {
   const { theme } = useTheme();
+  const user = useAuthStore((s) => s.user);
 
   const [credit, setCredit] = useState<Credit | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
@@ -68,19 +71,20 @@ export default function CreditoScreen() {
   const [loadingSim, setLoadingSim] = useState(false);
   const [disbursedAmount, setDisbursedAmount] = useState(0);
 
+  const loadCreditData = async () => {
+    const [c, w] = await Promise.all([getCredit(), getWallet()]);
+    setCredit(c);
+    setWallet(w);
+    setAmount((current) => Math.min(Math.max(MIN_AMOUNT, current), Math.max(MIN_AMOUNT, c.estimatedAmount)));
+  };
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [c, w] = await Promise.all([getCredit(), getWallet()]);
-      if (cancelled) return;
-      setCredit(c);
-      setWallet(w);
-      setAmount((current) => Math.min(Math.max(MIN_AMOUNT, current), Math.max(MIN_AMOUNT, c.estimatedAmount)));
-    })();
-    return () => {
-      cancelled = true;
-    };
+    loadCreditData();
   }, []);
+
+  useFinancialRealtime(user?.id ?? 'demo-user-001', () => {
+    loadCreditData();
+  });
 
   const available = credit?.estimatedAmount ?? 0;
   const canRequest = available > 0;

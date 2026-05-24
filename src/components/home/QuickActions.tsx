@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Antenna, Brain, Camera, CircleDollarSign, ShoppingCart } from 'lucide-react-native';
+import { Brain, Camera, CircleDollarSign, Send } from 'lucide-react-native';
 import { View } from 'react-native';
 
 import { Card, IconCircle, PressableScale, Text } from '@/components';
@@ -18,15 +18,10 @@ type Props = {
 export function QuickActions({ delay = 0, onAction }: Props) {
   const router = useRouter();
   const actions: Action[] = [
-    { label: 'Registrar\ningreso', Icon: CircleDollarSign },
-    { label: 'Registrar\nventa', Icon: ShoppingCart },
+    { label: 'Transferir', Icon: Send, onPress: () => router.push('/nfc-transfer') },
+    { label: 'Recibir\ndinero', Icon: CircleDollarSign },
     { label: 'Pagar\ncon foto', Icon: Camera },
     { label: 'Preguntar\nIA', Icon: Brain },
-    {
-      label: 'Enviar\npor NFC',
-      Icon: Antenna,
-      onPress: () => router.push('/nfc-transfer'),
-    },
   ];
 
   return (

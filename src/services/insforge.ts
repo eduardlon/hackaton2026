@@ -8,19 +8,20 @@
  *   - Sesión en memoria (token NO se persiste → al cerrar la app se borra)
  *   - PIN guardado en SecureStore con candado biométrico para login con huella
  *
- * Backend Insforge esperado (Edge Functions):
- *   - `auth-lookup-phone` { phone }                    → { exists, user? }
- *   - `auth-register` { phone, name, pinHash, pin }    → { user, session }
- *   - `auth-login-pin` { phone, pinHash, pin }         → { user, session }
+ * Backend Insforge esperado para la demo hackathon:
+ *   - `demo-login` { phone, pin }                      → { user, session }
+ *
+ * Importante: las functions productivas auth-lookup-phone/auth-register/auth-login-pin
+ * no existen en este backend demo. No las llames o Expo recibirá HTTP 404.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 const baseUrl = (process.env.EXPO_PUBLIC_INSFORGE_URL ?? '').replace(/\/$/, '');
 const functionsUrl = (process.env.EXPO_PUBLIC_INSFORGE_FUNCTIONS_URL ?? '').replace(/\/$/, '');
 const anonKey = process.env.EXPO_PUBLIC_INSFORGE_ANON_KEY ?? '';
-const PIN_PEPPER = 'fingrow.v1';
+const DEMO_PHONE = '+573001112233';
+const DEMO_USER_NAME = 'Laura Martínez';
 
 export function isInsforgeConfigured() {
   return Boolean(baseUrl || functionsUrl);
@@ -173,11 +174,6 @@ export function normalizePhone(input: string): string {
   return clean.startsWith('57') ? `+${clean}` : `+57${clean}`;
 }
 
-async function hashPin(phone: string, pin: string): Promise<string> {
-  const material = `${PIN_PEPPER}::${phone}::${pin}`;
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, material);
-}
-
 async function postFunction(slug: string, body: Record<string, unknown>) {
   return fetch(functionUrl(slug), {
     method: 'POST',
@@ -226,18 +222,9 @@ function extractAuth(payload: AuthSessionResponse, phoneFallback: string): AuthU
 
 export async function lookupPhone(phone: string): Promise<{ exists: boolean; name?: string }> {
   const normalized = normalizePhone(phone);
-  if (!isInsforgeConfigured()) {
-    return { exists: false };
-  }
-
-  try {
-    const res = await postFunction('auth-lookup-phone', { phone: normalized });
-    if (!res.ok) throw await parseError(res, 'No se pudo buscar el celular');
-    const data = (await res.json()) as { exists?: boolean; user?: { name?: string } | null };
-    return { exists: Boolean(data.exists), name: data.user?.name };
-  } catch (err) {
-    throw err instanceof Error ? err : new Error('No se pudo buscar el celular');
-  }
+  return normalized === DEMO_PHONE
+    ? { exists: true, name: DEMO_USER_NAME }
+    : { exists: false };
 }
 
 export async function registerWithPhone(
@@ -252,14 +239,12 @@ export async function registerWithPhone(
     throw new Error('El PIN debe tener exactamente 4 dígitos');
   }
   const normalized = normalizePhone(phone);
-  const pinHash = await hashPin(normalized, pin);
-  const res = await postFunction('auth-register', {
+  const res = await postFunction('demo-login', {
     phone: normalized,
-    name,
-    pinHash,
     pin,
   });
-  if (!res.ok) throw await parseError(res, 'No fue posible crear tu cuenta');
+  void name;
+  if (!res.ok) throw await parseError(res, 'No fue posible crear tu sesión demo');
 
   const payload = (await res.json()) as AuthSessionResponse;
   await storePhone(normalized);
@@ -274,10 +259,8 @@ export async function loginWithPin(phone: string, pin: string): Promise<AuthUser
   if (!isInsforgeConfigured()) {
     throw new Error('Insforge no está configurado. Revisa tu .env');
   }
-  const pinHash = await hashPin(normalized, pin);
-  const res = await postFunction('auth-login-pin', {
+  const res = await postFunction('demo-login', {
     phone: normalized,
-    pinHash,
     pin,
   });
   if (!res.ok) throw await parseError(res, 'No fue posible iniciar sesión');

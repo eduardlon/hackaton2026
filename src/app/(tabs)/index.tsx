@@ -1,33 +1,46 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, View } from 'react-native';
 
-import { Header, ScreenContainer } from '@/components';
+import { Card, Header, PressableScale, ScreenContainer, Text } from '@/components';
 import { AIInsightCard } from '@/components/home/AIInsightCard';
 import { CreditMiniCard } from '@/components/home/CreditMiniCard';
-import { QuickActions } from '@/components/home/QuickActions';
 import { SummaryCard } from '@/components/home/SummaryCard';
+import { useFinancialRealtime } from '@/hooks/useFinancialRealtime';
 import {
   getCredit,
   getWallet,
-  askFinancialChat,
-  confirmBillPaymentFromInvoice,
-  processInvoiceDemo,
-  recordFinancialActivity,
+  repayCredit,
 } from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
+import { useTheme } from '@/theme';
 import type {
   Credit,
   Wallet,
 } from '@/types';
+import { formatMoney } from '@/utils/format';
 
 export default function HomeScreen() {
+  const { theme } = useTheme();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
 
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [credit, setCredit] = useState<Credit | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [repayMenuVisible, setRepayMenuVisible] = useState(false);
+  const [repayLoadingAmount, setRepayLoadingAmount] = useState<number | null>(null);
+  const realtimeUserId = user?.id ?? 'demo-user-001';
+
+  const activeLoan = credit?.activeLoan?.status === 'active' ? credit.activeLoan : null;
+  const repaymentOptions = activeLoan
+    ? Array.from(
+        new Set(
+          [activeLoan.nextPaymentAmount, 100000, 200000, activeLoan.outstandingBalance]
+            .map((amount) => Math.round(amount))
+            .filter((amount) => amount > 0 && amount <= activeLoan.outstandingBalance)
+        )
+      )
+    : [];
 
   const loadHome = async () => {
     const [w, c] = await Promise.all([
@@ -48,102 +61,31 @@ export default function HomeScreen() {
     }, [])
   );
 
-  const runAction = async (label: string, task: () => Promise<void>) => {
-    if (actionLoading) return;
-    setActionLoading(label);
-    try {
-      await task();
-    } catch (error) {
-      Alert.alert('No pudimos completar la acción', error instanceof Error ? error.message : 'Intenta de nuevo.');
-    } finally {
-      setActionLoading(null);
+  useFinancialRealtime(realtimeUserId, () => {
+    loadHome();
+  });
+
+  const handleRepayCredit = async (amount: number) => {
+    if (!wallet || !activeLoan) return;
+    if (amount > wallet.balance) {
+      Alert.alert('Saldo insuficiente', 'No tienes suficiente dinero disponible para hacer ese abono.');
+      return;
     }
-  };
 
-  const handleRegisterIncome = () => {
-    Alert.alert('Registrar ingreso', 'Agregaremos un ingreso demo de $300.000 a tu billetera.', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Registrar',
-        onPress: () => {
-          runAction('Registrando ingreso…', async () => {
-            const result = await recordFinancialActivity({
-              type: 'income',
-              amount: 300000,
-              category: 'Ingresos',
-              description: 'Ingreso registrado desde Inicio',
-            });
-            await loadHome();
-            Alert.alert('Ingreso registrado', `Tu Pasaporte sumó +${result.passportUpdate.pointsAdded} puntos.`);
-          });
-        },
-      },
-    ]);
-  };
-
-  const handleRegisterSale = () => {
-    Alert.alert('Registrar venta', 'Agregaremos una venta demo de $150.000 a tu negocio.', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Registrar',
-        onPress: () => {
-          runAction('Registrando venta…', async () => {
-            const result = await recordFinancialActivity({
-              type: 'sale',
-              amount: 150000,
-              category: 'Ventas',
-              description: 'Venta registrada desde Inicio',
-            });
-            await loadHome();
-            Alert.alert('Venta registrada', `Tu Pasaporte sumó +${result.passportUpdate.pointsAdded} puntos.`);
-          });
-        },
-      },
-    ]);
-  };
-
-  const handlePayWithPhoto = () => {
-    runAction('Analizando factura…', async () => {
-      const invoice = await processInvoiceDemo();
-      const { extracted } = invoice;
+    setRepayLoadingAmount(amount);
+    try {
+      const result = await repayCredit(amount);
+      await loadHome();
+      setRepayMenuVisible(false);
       Alert.alert(
-        'Factura detectada',
-        `${extracted.provider ?? 'Proveedor'}\nValor: $${(extracted.amount ?? 0).toLocaleString('es-CO')}\nReferencia: ${extracted.reference ?? 'requiere revisión'}`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Pagar',
-            onPress: () => {
-              runAction('Pagando factura…', async () => {
-                const result = await confirmBillPaymentFromInvoice(invoice);
-                await loadHome();
-                Alert.alert(
-                  'Pago exitoso',
-                  `Pagaste ${result.payment.provider} y tu Pasaporte sumó +${result.passportUpdate.pointsAdded} puntos.`
-                );
-              });
-            },
-          },
-        ]
+        'Abono aplicado',
+        `Abonaste ${formatMoney(result.payment.amount)}. Tu nuevo saldo es ${formatMoney(result.wallet.currentBalance)}.`
       );
-    });
-  };
-
-  const handleAskAI = () => {
-    runAction('Consultando IA…', async () => {
-      const result = await askFinancialChat('¿Puedo pedir $2.000.000 para mi negocio?');
-      Alert.alert('IA financiera', result.answer, [
-        { text: 'Cerrar' },
-        { text: 'Ver análisis', onPress: () => router.push('/(tabs)/analisis') },
-      ]);
-    });
-  };
-
-  const handleQuickAction = (label: string) => {
-    if (label.includes('ingreso')) return handleRegisterIncome();
-    if (label.includes('venta')) return handleRegisterSale();
-    if (label.includes('foto')) return handlePayWithPhoto();
-    if (label.includes('IA')) return handleAskAI();
+    } catch (error) {
+      Alert.alert('No pudimos abonar el crédito', error instanceof Error ? error.message : 'Intenta de nuevo.');
+    } finally {
+      setRepayLoadingAmount(null);
+    }
   };
 
   return (
@@ -166,15 +108,8 @@ export default function HomeScreen() {
             credit={credit}
             delay={120}
             onSimulate={() => router.push('/(tabs)/credito')}
+            onRepay={() => setRepayMenuVisible(true)}
           />
-        ) : null}
-
-        <QuickActions delay={280} onAction={handleQuickAction} />
-
-        {actionLoading ? (
-          <View style={{ alignItems: 'center', gap: 8, paddingVertical: 6 }}>
-            <ActivityIndicator />
-          </View>
         ) : null}
 
         <AIInsightCard
@@ -184,6 +119,80 @@ export default function HomeScreen() {
         />
 
       </View>
+
+      <Modal
+        visible={repayMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRepayMenuVisible(false)}
+      >
+        <Pressable
+          onPress={() => setRepayMenuVisible(false)}
+          style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.42)' }}
+        >
+          <Pressable style={{ padding: 16 }} onPress={() => {}}>
+            <Card animated={false} padded style={{ padding: 20, gap: 16 }}>
+              <View style={{ gap: 4 }}>
+                <Text variant="h2">Abonar crédito</Text>
+                <Text variant="bodySmall" tone="muted">
+                  Elige cuánto quieres pagar. El abono se descuenta de tu saldo disponible.
+                </Text>
+              </View>
+
+              {activeLoan ? (
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text variant="micro" tone="muted">
+                      Debes
+                    </Text>
+                    <Text variant="bodyStrong">{formatMoney(activeLoan.outstandingBalance)}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text variant="micro" tone="muted">
+                      Saldo actual
+                    </Text>
+                    <Text variant="bodyStrong">{formatMoney(wallet?.balance ?? 0)}</Text>
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={{ gap: 10 }}>
+                {repaymentOptions.map((amount) => {
+                  const disabled = Boolean(repayLoadingAmount) || amount > (wallet?.balance ?? 0);
+                  return (
+                    <PressableScale
+                      key={amount}
+                      disabled={disabled}
+                      onPress={() => handleRepayCredit(amount)}
+                      haptic="light"
+                      style={{
+                        minHeight: 52,
+                        borderRadius: theme.radii.lg,
+                        paddingHorizontal: 14,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: theme.colors.surfaceAlt,
+                        borderWidth: 1,
+                        borderColor: theme.colors.borderSoft,
+                        opacity: disabled ? 0.55 : 1,
+                      }}
+                    >
+                      <View>
+                        <Text variant="bodyStrong">{formatMoney(amount)}</Text>
+                        <Text variant="micro" tone="muted">
+                          {activeLoan && amount === activeLoan.outstandingBalance ? 'Liquidar deuda' : 'Abono parcial'}
+                        </Text>
+                      </View>
+                      {repayLoadingAmount === amount ? <ActivityIndicator /> : <Text variant="caption" tone="primary">Pagar</Text>}
+                    </PressableScale>
+                  );
+                })}
+              </View>
+            </Card>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScreenContainer>
   );
 }
