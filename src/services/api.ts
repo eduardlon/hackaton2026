@@ -109,12 +109,19 @@ type BrebPaymentResponse = {
   wallet: ConfirmBillPaymentResponse['wallet'];
 };
 
-type FinancialChatResponse = {
+export type FinancialChatHistoryItem = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+export type FinancialChatResponse = {
   answer: string;
   riskLevel: string;
   cards: { title: string; value: string }[];
   suggestedActions: string[];
   disclaimer: string;
+  model?: string;
+  usedFallback?: boolean;
 };
 
 export type ProcessInvoiceResponse = {
@@ -482,8 +489,11 @@ export async function payBreb(input: {
   return result;
 }
 
-export async function askFinancialChat(message: string): Promise<FinancialChatResponse> {
-  return invokeFunction<FinancialChatResponse>('financial-chat', { message });
+export async function askFinancialChat(
+  message: string,
+  history: FinancialChatHistoryItem[] = []
+): Promise<FinancialChatResponse> {
+  return invokeFunction<FinancialChatResponse>('financial-chat', { message, history });
 }
 
 export async function processInvoiceDemo(): Promise<ProcessInvoiceResponse> {

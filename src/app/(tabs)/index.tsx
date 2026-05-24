@@ -115,7 +115,7 @@ export default function HomeScreen() {
         <AIInsightCard
           delay={360}
           message="Tus ingresos se han mantenido estables. Puedes asumir una cuota de hasta $250.000 sin afectar tu flujo."
-          onPress={() => router.push('/(tabs)/analisis')}
+          onPress={() => router.push('/financial-agent')}
         />
 
       </View>

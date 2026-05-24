@@ -531,7 +531,8 @@ export function BottomTabBar({ state, navigation }: AppTabBarProps) {
   const openAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setQuickMenuVisible(false);
-    setAiVisible(true);
+    setAiVisible(false);
+    router.push('/financial-agent');
   };
 
   const handleReceiveMoney = () => {
