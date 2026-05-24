@@ -1,5 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { ArrowLeftRight, Bot, CoinsIcon, Home, LineChart, Mic, Sparkles, X } from 'lucide-react-native';
+import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
+import { ArrowLeftRight, CoinsIcon, Home, LineChart, Mic, Sparkles, X } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, View } from 'react-native';
 import Animated, {
@@ -11,6 +12,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
 import { askFinancialChat } from '@/services/api';
 import { useTheme } from '@/theme';
@@ -208,21 +210,57 @@ function QuickAIButton({ onLongPress }: { onLongPress: () => void }) {
         marginTop: -18,
       }}
     >
-      <View
+      <ExpoLinearGradient
+        colors={['#D8FF45', theme.colors.primary, '#8ED000']}
+        start={{ x: 0.2, y: 0 }}
+        end={{ x: 0.8, y: 1 }}
         style={{
           width: 66,
           height: 54,
           borderRadius: 22,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: theme.colors.primary,
           borderWidth: 4,
           borderColor: theme.colors.bg,
-          ...theme.shadows.lg,
+          shadowColor: theme.colors.primary,
+          shadowOpacity: 0.55,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 8,
         }}
       >
-        <Bot size={28} color={theme.colors.primaryContrast} strokeWidth={2.5} />
-      </View>
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 5,
+            left: 9,
+            right: 9,
+            height: 14,
+            borderRadius: 999,
+            backgroundColor: 'rgba(255,255,255,0.22)',
+          }}
+        />
+        <Svg width={39} height={36} viewBox="0 0 56 52">
+          <Defs>
+            <LinearGradient id="aiIconDepth" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#1F2524" />
+              <Stop offset="1" stopColor="#0B0D0B" />
+            </LinearGradient>
+          </Defs>
+          <Path
+            d="M19.8 5.2C21.4 14.3 26.8 19.7 36 21.3C26.8 22.9 21.4 28.3 19.8 37.4C18.2 28.3 12.8 22.9 3.7 21.3C12.8 19.7 18.2 14.3 19.8 5.2Z"
+            fill="url(#aiIconDepth)"
+          />
+          <Path
+            d="M43.4 8.4C44.2 12.7 46.7 15.2 51 16C46.7 16.8 44.2 19.3 43.4 23.6C42.6 19.3 40.1 16.8 35.8 16C40.1 15.2 42.6 12.7 43.4 8.4Z"
+            fill="url(#aiIconDepth)"
+          />
+          <Rect x="13" y="36" width="9" height="12" rx="4" fill="url(#aiIconDepth)" />
+          <Rect x="25" y="30" width="9" height="18" rx="4" fill="url(#aiIconDepth)" />
+          <Rect x="37" y="23" width="9" height="25" rx="4" fill="url(#aiIconDepth)" />
+        </Svg>
+      </ExpoLinearGradient>
     </PressableScale>
   );
 }

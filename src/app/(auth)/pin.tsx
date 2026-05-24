@@ -46,6 +46,7 @@ export default function PinScreen() {
 
   const [pin, setPin] = useState<string>('');
   const [hasBiometricHw, setHasBiometricHw] = useState(false);
+  const [allowAutoBiometric] = useState(hasBiometric);
   const triedBiometric = useRef(false);
 
   // Si llegaron directo a PIN (sin pasar por Continuar), volver al celular.
@@ -85,17 +86,18 @@ export default function PinScreen() {
     })();
   }, []);
 
-  // Huella automática solo después de Continuar en pantalla de celular.
+  // Huella automática solo si ya existía al entrar a esta pantalla.
+  // Al primer login con PIN se activa biometría, pero no debe pedir huella otra vez.
   useEffect(() => {
     if (!fromContinue) return;
     if (triedBiometric.current) return;
-    if (!hasBiometricHw || !hasBiometric) return;
+    if (!hasBiometricHw || !allowAutoBiometric) return;
     triedBiometric.current = true;
     setTimeout(() => {
       promptBiometric();
     }, 350);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromContinue, hasBiometricHw, hasBiometric]);
+  }, [fromContinue, hasBiometricHw, allowAutoBiometric]);
 
   const goBack = () => {
     if (router.canGoBack()) {

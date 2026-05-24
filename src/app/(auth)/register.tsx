@@ -163,16 +163,16 @@ export default function RegisterScreen() {
         </PressableScale>
       </View>
 
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{
-          flexGrow: 1,
-          paddingTop: insets.top + 16,
-          paddingBottom: insets.bottom + 12,
-          paddingHorizontal: 20,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
+      <View style={{ flex: 1, paddingTop: insets.top + 16 }}>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingBottom: insets.bottom + 12,
+            paddingHorizontal: 20,
+          }}
+          showsVerticalScrollIndicator={false}
+        >
         <View style={{ alignItems: 'center', marginTop: 8 }}>
           <FinGrowLogo size="sm" />
         </View>
@@ -442,7 +442,8 @@ export default function RegisterScreen() {
             ))}
           </View>
         )}
-      </ScrollView>
+        </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }

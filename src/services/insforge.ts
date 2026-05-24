@@ -9,14 +9,18 @@
  *   - PIN guardado en SecureStore con candado biométrico para login con huella
  *
  * Backend Insforge esperado (Edge Functions):
- *   - `demo-login` { phone, pin }                     → { user, session }
+ *   - `auth-lookup-phone` { phone }                    → { exists, user? }
+ *   - `auth-register` { phone, name, pinHash, pin }    → { user, session }
+ *   - `auth-login-pin` { phone, pinHash, pin }         → { user, session }
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 const baseUrl = (process.env.EXPO_PUBLIC_INSFORGE_URL ?? '').replace(/\/$/, '');
 const functionsUrl = (process.env.EXPO_PUBLIC_INSFORGE_FUNCTIONS_URL ?? '').replace(/\/$/, '');
 const anonKey = process.env.EXPO_PUBLIC_INSFORGE_ANON_KEY ?? '';
+const PIN_PEPPER = 'fingrow.v1';
 
 export function isInsforgeConfigured() {
   return Boolean(baseUrl || functionsUrl);
@@ -169,6 +173,19 @@ export function normalizePhone(input: string): string {
   return clean.startsWith('57') ? `+${clean}` : `+57${clean}`;
 }
 
+async function hashPin(phone: string, pin: string): Promise<string> {
+  const material = `${PIN_PEPPER}::${phone}::${pin}`;
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, material);
+}
+
+async function postFunction(slug: string, body: Record<string, unknown>) {
+  return fetch(functionUrl(slug), {
+    method: 'POST',
+    headers: buildHeaders(),
+    body: JSON.stringify(body),
+  });
+}
+
 // ──────────────────────────────────────────────────────────
 // Tipos comunes
 // ──────────────────────────────────────────────────────────
@@ -209,8 +226,18 @@ function extractAuth(payload: AuthSessionResponse, phoneFallback: string): AuthU
 
 export async function lookupPhone(phone: string): Promise<{ exists: boolean; name?: string }> {
   const normalized = normalizePhone(phone);
-  if (normalized === '+573001112233') return { exists: true, name: 'Laura Martínez' };
-  return { exists: false };
+  if (!isInsforgeConfigured()) {
+    return { exists: false };
+  }
+
+  try {
+    const res = await postFunction('auth-lookup-phone', { phone: normalized });
+    if (!res.ok) throw await parseError(res, 'No se pudo buscar el celular');
+    const data = (await res.json()) as { exists?: boolean; user?: { name?: string } | null };
+    return { exists: Boolean(data.exists), name: data.user?.name };
+  } catch (err) {
+    throw err instanceof Error ? err : new Error('No se pudo buscar el celular');
+  }
 }
 
 export async function registerWithPhone(
@@ -225,17 +252,15 @@ export async function registerWithPhone(
     throw new Error('El PIN debe tener exactamente 4 dígitos');
   }
   const normalized = normalizePhone(phone);
-  const res = await fetch(functionUrl('demo-login'), {
-    method: 'POST',
-    headers: buildHeaders(),
-    body: JSON.stringify({
-      phone: normalized,
-      pin,
-    }),
+  const pinHash = await hashPin(normalized, pin);
+  const res = await postFunction('auth-register', {
+    phone: normalized,
+    name,
+    pinHash,
+    pin,
   });
+  if (!res.ok) throw await parseError(res, 'No fue posible crear tu cuenta');
 
-  void name;
-  if (!res.ok) throw await parseError(res, 'No fue posible crear tu sesión demo');
   const payload = (await res.json()) as AuthSessionResponse;
   await storePhone(normalized);
   return extractAuth(payload, normalized);
@@ -249,16 +274,14 @@ export async function loginWithPin(phone: string, pin: string): Promise<AuthUser
   if (!isInsforgeConfigured()) {
     throw new Error('Insforge no está configurado. Revisa tu .env');
   }
-  const res = await fetch(functionUrl('demo-login'), {
-    method: 'POST',
-    headers: buildHeaders(),
-    body: JSON.stringify({
-      phone: normalized,
-      pin,
-    }),
+  const pinHash = await hashPin(normalized, pin);
+  const res = await postFunction('auth-login-pin', {
+    phone: normalized,
+    pinHash,
+    pin,
   });
+  if (!res.ok) throw await parseError(res, 'No fue posible iniciar sesión');
 
-  if (!res.ok) throw await parseError(res, 'PIN incorrecto');
   const payload = (await res.json()) as AuthSessionResponse;
   await storePhone(normalized);
   return extractAuth(payload, normalized);

@@ -27,7 +27,6 @@ export function ScreenContainer({
 
   const Wrapper = scroll ? ScrollView : View;
   const baseContentStyle: ViewStyle = {
-    paddingTop: insets.top + 12,
     paddingBottom: (hasTabBar ? 110 : insets.bottom) + 16,
     paddingHorizontal: padHorizontal ? 18 : 0,
   };
@@ -39,14 +38,16 @@ export function ScreenContainer({
       transition={{ type: 'timing', duration: 280 }}
       style={{ flex: 1, backgroundColor: theme.colors.bg }}
     >
-      <Wrapper
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={scroll ? [baseContentStyle, contentContainerStyle] : undefined}
-        style={!scroll ? [{ flex: 1 }, baseContentStyle] : undefined}
-        refreshControl={refreshControl}
-      >
-        {children}
-      </Wrapper>
+      <View style={{ flex: 1, paddingTop: insets.top + 12 }}>
+        <Wrapper
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={scroll ? [baseContentStyle, contentContainerStyle] : undefined}
+          style={!scroll ? [{ flex: 1 }, baseContentStyle] : { flex: 1 }}
+          refreshControl={refreshControl}
+        >
+          {children}
+        </Wrapper>
+      </View>
     </MotiView>
   );
 }

@@ -98,17 +98,12 @@ export default function PhoneScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
     >
       <AuthBackgroundDecorations />
-      <ScrollView
-        ref={scrollRef}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{
-          flexGrow: 1,
+
+      <View
+        style={{
           paddingTop: insets.top + 12,
-          paddingBottom: insets.bottom + 96,
           paddingHorizontal: 20,
-          justifyContent: 'center',
         }}
-        showsVerticalScrollIndicator={false}
       >
         {/* Top row: Acceso rápido + Ayuda */}
         <MotiView
@@ -119,7 +114,6 @@ export default function PhoneScreen() {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: 28,
           }}
         >
           <View
@@ -168,13 +162,26 @@ export default function PhoneScreen() {
             </Text>
           </PressableScale>
         </MotiView>
+      </View>
 
+      <ScrollView
+        ref={scrollRef}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingTop: 0,
+          paddingBottom: insets.bottom + 24,
+          paddingHorizontal: 20,
+          justifyContent: 'space-between',
+        }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Logo central */}
         <MotiView
           from={{ opacity: 0, translateY: 8 }}
           animate={{ opacity: 1, translateY: 0 }}
           transition={{ type: 'timing', duration: 480, delay: 120 }}
-          style={{ marginBottom: 28 }}
+          style={{ flex: 1, justifyContent: 'center', marginBottom: 22, minHeight: 260 }}
         >
           <FinGrowLogo size="lg" />
           <View style={{ marginTop: 18, alignItems: 'center' }}>
@@ -194,13 +201,14 @@ export default function PhoneScreen() {
           </View>
         </MotiView>
 
-        {/* Campo celular */}
-        <MotiView
-          from={{ opacity: 0, translateY: 16 }}
-          animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: 'timing', duration: 360, delay: 260 }}
-        >
-          <Pressable onPress={() => inputRef.current?.focus()}>
+        <View>
+          {/* Campo celular */}
+          <MotiView
+            from={{ opacity: 0, translateY: 16 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: 'timing', duration: 360, delay: 260 }}
+          >
+            <Pressable onPress={() => inputRef.current?.focus()}>
             <View
               style={{
                 flexDirection: 'row',
@@ -254,7 +262,7 @@ export default function PhoneScreen() {
                 autoComplete="tel"
               />
             </View>
-          </Pressable>
+            </Pressable>
 
           <View
             style={{
@@ -269,9 +277,9 @@ export default function PhoneScreen() {
               Escribe tu número para continuar
             </Text>
           </View>
-        </MotiView>
+          </MotiView>
 
-        {error ? (
+          {error ? (
           <MotiView
             from={{ opacity: 0, translateY: -4 }}
             animate={{ opacity: 1, translateY: 0 }}
@@ -291,10 +299,10 @@ export default function PhoneScreen() {
               {error}
             </Text>
           </MotiView>
-        ) : null}
+          ) : null}
 
         {/* Botón continuar + registro */}
-        <MotiView
+          <MotiView
           from={{ opacity: 0, translateY: 16 }}
           animate={{ opacity: 1, translateY: 0 }}
           transition={{ type: 'timing', duration: 360, delay: 360 }}
@@ -370,10 +378,10 @@ export default function PhoneScreen() {
               Registrarme
             </Text>
           </PressableScale>
-        </MotiView>
+          </MotiView>
 
         {/* ¿Cambiaste tu cel? */}
-        <MotiView
+          <MotiView
           from={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ type: 'timing', duration: 360, delay: 480 }}
@@ -394,7 +402,8 @@ export default function PhoneScreen() {
               ¿Cambiaste tu cel?
             </Text>
           </PressableScale>
-        </MotiView>
+          </MotiView>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

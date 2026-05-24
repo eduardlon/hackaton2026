@@ -14,6 +14,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { configureNotifications } from '@/services/notifications';
 import { useAuthStore } from '@/store/authStore';
 import { ThemeProvider, useTheme } from '@/theme';
 
@@ -29,6 +30,7 @@ function RootStack() {
 
   useEffect(() => {
     hydrate();
+    configureNotifications().catch(() => {});
   }, [hydrate]);
 
   useEffect(() => {
